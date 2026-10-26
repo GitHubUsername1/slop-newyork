@@ -1416,28 +1416,6 @@ function buildCityBlocks(scene) {
     }
   }
 
-  // Low-rise waterfront blocks: warehouses, garages and small walk-ups (keeps the East River skyline view open)
-  function lowriseBlock(blk, cfg, x0, x1) {
-    const { minZ, maxZ } = blk;
-    const halfD = (maxZ - minZ) * 0.5;
-    let x = x0;
-    while (x1 - x > 0.5) {
-      let w = range(10, 26);
-      if (x1 - x - w < 8) w = x1 - x;
-      const lots = chance(0.6)
-        ? [rect(x, x + w, minZ, maxZ)]
-        : [rect(x, x + w, minZ, minZ + halfD), rect(x, x + w, maxZ - halfD, maxZ)];
-      for (const lot of lots) {
-        const mat = pickW([[1, 4], [0, 3], [3, 1]]);
-        const f = irange(cfg.floors[0], cfg.floors[1]);
-        const b = building(blk, mat, lot);
-        mass(b, [lot], 0, f);
-        commit(blk, b, { cornice: mat <= 2 && chance(0.6), corniceH: 0.6, roof: f >= 5 ? 'walkup' : 'none', wtP: 0.3 });
-      }
-      x += w;
-    }
-  }
-
   // East River lots between 1st Ave and the FDR Drive (23rd–58th St), too narrow for regular lots: a 2-4 storey podium
   // with a slab rising from it, as tall as the lot is wide allows (Kips Bay & NYU Langone hospital slabs, glass towers
   // on the old Con Ed site at 35th–41st St, Beekman & Sutton Place apartment towers). On the 42nd–45th St superblock
@@ -1499,7 +1477,6 @@ function buildCityBlocks(scene) {
     loft: loftBlock,
     office: officeBlock,
     projects: projectsBlock,
-    lowrise: lowriseBlock,
     river: riverfrontBlock
   };
 
@@ -1735,7 +1712,6 @@ function buildCityBlocks(scene) {
 
   const PROJECTS = { kind: 'projects', floors: [12, 20], mats: [[1, 8], [0, 2]] };
   const PROJECTS_STUY_TOWN = { ...PROJECTS, floors: [12, 14], mats: [[1, 1]] };
-  const LOWRISE = { kind: 'lowrise', floors: [2, 7] };
   const RIVERFRONT = { kind: 'river' };
 
   const CPB = CENTRAL_PARK_BOUNDS;
@@ -1806,7 +1782,7 @@ function buildCityBlocks(scene) {
    * architectural features (stone cornices, water towers, rooftop bulkheads, fire escapes, awnings, storefront
    * fascia signs, and scaffolding sheds) into the Quadtree.
    */
-  function populateBlock(minX, maxX, minZ, maxZ, colIndex, rowIndex, isOuter = false, lowRiseEsplanade = false, district = 'midtown') {
+  function populateBlock(minX, maxX, minZ, maxZ, district = 'midtown') {
     const bw = maxX - minX;
     const bd = maxZ - minZ;
     if (bw < (district === 'riverfront' ? 9 : minLot) || bd < minLot) return;
@@ -1841,7 +1817,7 @@ function buildCityBlocks(scene) {
     // Times Square's billboards hang on the walls of the lots fronting the bowtie (section B7), so a sheer wall rises
     // flush there
     const flush = { w: false, e: false };
-    if (TS && !isOuter && (xf || (maxZ > TS.zN && minZ < TS.zS))) {
+    if (TS && (xf || (maxZ > TS.zN && minZ < TS.zS))) {
       const za = xf ? minZ : Math.max(minZ, TS.zN);
       const zb = xf ? maxZ : Math.min(maxZ, TS.zS);
       flush.w = frontsBowtie(minX, -1, za, zb);
@@ -1859,7 +1835,7 @@ function buildCityBlocks(scene) {
       else x1 -= w;
     }
     if (x1 - x0 > 0.5) {
-      const profile = lowRiseEsplanade ? LOWRISE : blockProfile(blockDetail, district);
+      const profile = blockProfile(blockDetail, district);
       LAYOUTS[profile.kind](blockDetail, profile, x0, x1);
     }
     openOntoVoidLots(blockDetail);
@@ -1998,7 +1974,7 @@ function buildCityBlocks(scene) {
         for (const part of minusReserves(r)) {
           for (const [x0, x1, z0, z1] of splitDeep(part)) {
             if (x1 - x0 < minLot || z1 - z0 < minLot) continue;
-            populateBlock(x0, x1, z0, z1, 0, 0, false, false, b.district);
+            populateBlock(x0, x1, z0, z1, b.district);
           }
         }
       }
