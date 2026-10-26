@@ -1063,8 +1063,9 @@ function createLoftedCarMaterial(spec, fixedColorHex = null) {
   // Glasshouse: side windows (minus the B / C pillars), windshield & backlight, their black seals, chrome sill strip
   let sideG = polygonDistance(p.z, p.y, sideGlassPlanes, 0.07);
   for (const zp of cab.pillars) sideG = max(sideG, float(0.036).sub(abs(p.z.sub(zp))));
-  const backlight = coverage(polygonDistance(ax, p.z, rearGlassPlanes, 0.09)).mul(isWindow);
-  const glass = max(max(coverage(sideG), coverage(polygonDistance(ax, p.z, frontGlassPlanes, 0.09))), backlight.div(max(isWindow, 1e-4)))
+  const rearGlass = coverage(polygonDistance(ax, p.z, rearGlassPlanes, 0.09));
+  const backlight = rearGlass.mul(isWindow);
+  const glass = max(max(coverage(sideG), coverage(polygonDistance(ax, p.z, frontGlassPlanes, 0.09))), rearGlass)
     .mul(isWindow);
   const seal = max(
     coverage(polygonDistance(p.z, p.y, sideSealPlanes, 0.07)),
@@ -1653,11 +1654,8 @@ function heliFuselageSection(z, halfW, botY, topY, bellyFlat = 0.68, shoulderRat
   return [...bottomCenter, ...right, ...left].reverse();
 }
 
-/**
- * Helper to create an 8-point symmetric airfoil / cowling cross-section.
- */
-function heliAirfoilSection(xCenter, yCenter, zCenter, halfThickX, halfHeightY, chordZ) {
-  // Airfoil lying along Z (for vertical fin) or X (for horizontal stabilizer)
+// Six-point cross-section for the vertical fin and winglets.
+function heliAirfoilSection(xCenter, yCenter, zCenter, halfThickX, chordZ) {
   return [
     new THREE.Vector3(xCenter, yCenter, zCenter + chordZ * 0.5),
     new THREE.Vector3(xCenter + halfThickX, yCenter, zCenter + chordZ * 0.18),
@@ -1716,14 +1714,14 @@ function buildHelicopterBodyGeometry() {
   // 3. 3D Lofted Swept Vertical Tail Fin (Airfoil cross-sections sweeping from z = -5.15 to -6.15)
   // Upper swept fin + lower ventral tail bumper fin
   const vFinProfile = [
-    [-0.02, 0.88, -5.28, 0.05, 0.0, 0.44], // Ventral tail fin tip
-    [0.0,   1.48, -5.25, 0.12, 0.0, 0.88], // Tailboom junction root
-    [0.0,   1.95, -5.52, 0.10, 0.0, 0.76], // Mid swept vertical fin
-    [0.0,   2.48, -5.82, 0.08, 0.0, 0.60], // Upper swept vertical fin
-    [0.0,   2.82, -6.04, 0.05, 0.0, 0.42]  // Top anti-collision beacon tip
+    [-0.02, 0.88, -5.28, 0.05, 0.44], // Ventral tail fin tip
+    [0.0,   1.48, -5.25, 0.12, 0.88], // Tailboom junction root
+    [0.0,   1.95, -5.52, 0.10, 0.76], // Mid swept vertical fin
+    [0.0,   2.48, -5.82, 0.08, 0.60], // Upper swept vertical fin
+    [0.0,   2.82, -6.04, 0.05, 0.42]  // Top anti-collision beacon tip
   ];
-  const vFinSections = vFinProfile.map(([x, y, z, hx, hy, cz]) =>
-    heliAirfoilSection(x, y, z, hx, hy, cz).reverse()
+  const vFinSections = vFinProfile.map(([x, y, z, hx, cz]) =>
+    heliAirfoilSection(x, y, z, hx, cz).reverse()
   );
   parts.push(part(new LoftGeometry(vFinSections, { capStart: true, capEnd: true }), HELI_PARTS.FIN));
 
@@ -1754,7 +1752,7 @@ function buildHelicopterBodyGeometry() {
       [0.0,   0.036, 0.38],
       [0.26,  0.024, 0.26]
     ].map(([dy, hx, cz]) =>
-      heliAirfoilSection(wx + side * Math.abs(dy) * 0.12, 1.54 + dy, wz - Math.abs(dy) * 0.15, hx, 0, cz).reverse()
+      heliAirfoilSection(wx + side * Math.abs(dy) * 0.12, 1.54 + dy, wz - Math.abs(dy) * 0.15, hx, cz).reverse()
     );
     parts.push(part(new LoftGeometry(winglet, { capStart: true, capEnd: true }), HELI_PARTS.FIN));
   }
