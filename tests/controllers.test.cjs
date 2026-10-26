@@ -183,15 +183,175 @@ for (const mode of ['Person', 'Car', 'Cyclist', 'Helicopter']) {
     for (const reverse of [false, true]) {
       const full = advanceWithTouch(mode, 1, reverse);
       const partial = advanceWithTouch(mode, 0.4, reverse);
+      if (mode === 'Car') {
+        assert.equal(Math.sign(partial.speed), Math.sign(full.speed));
+        assert.ok(Math.abs(partial.speed) > 0 && Math.abs(partial.speed) < Math.abs(full.speed), 'partial throttle moves more slowly');
+        assert.equal(Math.sign(partial.steerAngle), Math.sign(full.steerAngle));
+        assert.ok(Math.abs(partial.steerAngle) > 0 && Math.abs(partial.steerAngle) < Math.abs(full.steerAngle), 'partial steering turns less');
+        continue;
+      }
       assert.ok(Math.abs(partial.speed - full.speed * 0.4) < 1e-10, 'movement should scale with joystick strength');
-      const turn = mode === 'Car' ? 'steerAngle' : 'heading';
-      assert.ok(Math.abs(partial[turn] - full[turn] * 0.4) < 1e-10, 'turning should scale with joystick strength');
+      assert.ok(Math.abs(partial.heading - full.heading * 0.4) < 1e-10, 'turning should scale with joystick strength');
       if (mode === 'Helicopter') {
         assert.ok(Math.abs(partial.verticalSpeed - full.verticalSpeed * 0.4) < 1e-10);
       }
     }
   });
 }
+
+function carDynamicsHarness(motion = {}) {
+  const { controller } = keyboardHarness();
+  const car = {
+    type: 'car', position: { x: 0, y: 0, z: 0 }, heading: 0, speed: 0,
+    vx: 0, vz: 0, angularVel: 0, steerAngle: 0, pitchVel: 0, rollVel: 0, heaveVel: 0, heaveY: 0, wheelSpin: 0,
+    chassisPivot: { rotation: { x: 0, z: 0 }, position: { y: 0 } }, wheels: [],
+    ...motion
+  };
+  controller.entities = { car };
+  controller.getGroundHeight = () => 0;
+  controller.resolveHorizontalCollision = () => {};
+  return {
+    controller, car,
+    advance(seconds, hz = 60) {
+      for (let i = 0; i < Math.round(seconds * hz); i++) controller.updateCar(1 / hz);
+    }
+  };
+}
+
+function carVelocity(car) {
+  return [Math.sin(car.heading) * car.speed + car.vx, Math.cos(car.heading) * car.speed + car.vz];
+}
+
+test('car handling preserves straight-line acceleration, coasting and braking', () => {
+  const acceleration = carDynamicsHarness();
+  acceleration.controller.keys.forward = true;
+  acceleration.advance(4.2);
+  assert.ok(Math.abs(acceleration.car.speed * 3.6 - 60) < 1, 'keep the existing taxi acceleration tuning');
+
+  const coasting = carDynamicsHarness({ speed: 50 / 3.6 });
+  coasting.advance(5);
+  assert.ok(Math.abs(coasting.car.speed * 3.6 - 33.07) < 0.2, 'keep the existing accelerator-release resistance');
+
+  const braking = carDynamicsHarness({ speed: 50 / 3.6 });
+  braking.controller.keys.backward = true;
+  braking.advance(1.5);
+  assert.ok(braking.car.speed >= 0 && braking.car.speed < 0.2, 'braking reaches a stop without reversing early');
+  assert.ok(braking.car.position.z > 9.8 && braking.car.position.z < 10.6, 'preserve the roughly ten-metre stopping distance');
+});
+
+test('car steering follows speed and reverses direction when backing up', () => {
+  const slow = carDynamicsHarness({ speed: 5 });
+  const fast = carDynamicsHarness({ speed: 25 });
+  const reverse = carDynamicsHarness({ speed: -5 });
+  const stopped = carDynamicsHarness();
+  for (const sim of [slow, fast, reverse, stopped]) {
+    sim.controller.keys.left = true;
+    sim.advance(1);
+  }
+  assert.ok(slow.car.heading > fast.car.heading && fast.car.heading > 0, 'fast steering follows a wider arc');
+  assert.ok(fast.car.steerAngle < slow.car.steerAngle / 3, 'reduce steering lock at speed');
+  assert.ok(Math.abs(fast.car.angularVel * fast.car.speed) < 9.5, 'high-speed turning stays within road-tire grip');
+  assert.ok(reverse.car.heading < 0, 'the same steering input turns the opposite way in reverse');
+  assert.ok(Math.abs(reverse.car.heading + slow.car.heading) < 0.05, 'forward and reverse steering remain symmetric');
+  assert.equal(stopped.car.heading, 0, 'steering alone cannot rotate a stationary car');
+  assert.equal(stopped.car.speed, 0);
+});
+
+test('releasing car steering settles smoothly and suspension leans outward', () => {
+  const sim = carDynamicsHarness({ speed: 15 });
+  sim.controller.keys.left = true;
+  sim.advance(2);
+  const turning = sim.car.angularVel;
+  assert.ok(sim.car.chassisPivot.rotation.z > 0, 'the body rolls away from the turn');
+  sim.controller.keys.left = false;
+  sim.advance(1 / 60);
+  assert.ok(sim.car.angularVel > 0, 'steering release does not snap away the existing yaw');
+  sim.advance(1.5);
+  assert.ok(Math.abs(sim.car.angularVel) < Math.abs(turning) * 0.1, 'yaw settles after the wheel recenters');
+  assert.ok(Math.abs(sim.car.steerAngle) < 0.001);
+});
+
+test('hard braking reduces steering grip without counting air resistance as tire force', () => {
+  const braking = carDynamicsHarness({ speed: 35 });
+  const coasting = carDynamicsHarness({ speed: 35 });
+  braking.controller.keys.backward = true;
+  for (const sim of [braking, coasting]) {
+    sim.controller.keys.left = true;
+    sim.advance(0.3);
+  }
+  assert.ok(braking.car.angularVel > 0.01, 'some steering remains available under hard braking');
+  assert.ok(braking.car.angularVel < coasting.car.angularVel, 'braking consumes part of the tire grip budget');
+});
+
+test('sustained car turns produce bounded slip that recovers with countersteering', () => {
+  for (const speed of [5, 15, 25]) {
+    const sim = carDynamicsHarness({ speed });
+    sim.controller.keys.forward = true;
+    sim.controller.keys.left = true;
+    let peakSlip = 0;
+    for (let i = 0; i < 900; i++) {
+      sim.controller.updateCar(1 / 60);
+      const slip = Math.atan2(Math.hypot(sim.car.vx, sim.car.vz), Math.abs(sim.car.speed));
+      peakSlip = Math.max(peakSlip, slip);
+      assert.ok(sim.car.speed > 4, 'holding a turn does not spin the car to a stop');
+    }
+    assert.ok(peakSlip > 0.08 && peakSlip < 0.27, 'hard turns allow a modest slide without a growing spin');
+
+    sim.controller.keys.left = false;
+    sim.controller.keys.right = true;
+    sim.advance(0.5);
+    assert.ok(sim.car.angularVel < 0, 'countersteering brings yaw back under control');
+    sim.controller.keys.right = false;
+    sim.controller.keys.forward = false;
+    sim.advance(2);
+    assert.ok(Math.hypot(sim.car.vx, sim.car.vz) < 0.05, 'the slide settles after steering is released');
+  }
+});
+
+test('car collision momentum is retained and sideways motion settles through grip', () => {
+  const forward = carDynamicsHarness({ vz: 8 });
+  forward.advance(0.1);
+  assert.ok(carVelocity(forward.car)[1] > 7.7, 'a forward impact becomes rolling motion instead of disappearing');
+  assert.ok(forward.car.speed > 7.7, 'longitudinal momentum reaches the signed speed used by other systems');
+
+  const sideways = carDynamicsHarness({ vx: 8 });
+  sideways.advance(0.1);
+  assert.ok(carVelocity(sideways.car)[0] > 6.9, 'tire grip cannot remove a sideways impact instantly');
+  sideways.advance(2);
+  assert.ok(Math.abs(carVelocity(sideways.car)[0]) < 0.1, 'sideways velocity eventually settles');
+});
+
+test('unpowered car steering and collision recovery never add translational energy', () => {
+  const sim = carDynamicsHarness({ speed: 20, vx: 3, angularVel: 1 });
+  sim.controller.keys.left = true;
+  let speed = Math.hypot(...carVelocity(sim.car));
+  for (let i = 0; i < 240; i++) {
+    sim.controller.updateCar(1 / 60);
+    const next = Math.hypot(...carVelocity(sim.car));
+    assert.ok(Number.isFinite(next) && next <= speed + 1e-9, 'steering and grip may redirect or dissipate momentum, but cannot create it');
+    speed = next;
+  }
+});
+
+test('car turning and impact recovery agree across 30, 60 and 120 Hz', () => {
+  const results = [30, 60, 120].map((hz) => {
+    const sim = carDynamicsHarness({ speed: 15, vx: 2, angularVel: 0.5 });
+    sim.controller.keys.left = 0.6;
+    sim.controller.keys.forward = 0.5;
+    sim.advance(2, hz);
+    sim.controller.keys.left = false;
+    sim.controller.keys.forward = false;
+    sim.advance(1, hz);
+    return sim.car;
+  });
+  for (const car of results.slice(0, 2)) {
+    const reference = results[2];
+    assert.ok(Math.hypot(car.position.x - reference.position.x, car.position.z - reference.position.z) < 0.1, 'path differs by less than ten centimetres');
+    assert.ok(Math.abs(car.heading - reference.heading) < 0.01);
+    assert.ok(Math.abs(car.speed - reference.speed) < 0.05);
+    assert.ok(Math.abs(car.chassisPivot.rotation.z - reference.chassisPivot.rotation.z) < 0.01);
+  }
+});
 
 function teleportHarness(mode, colliders = [], shore = () => ({ westX: -500, eastX: 500 })) {
   const harness = keyboardHarness({
