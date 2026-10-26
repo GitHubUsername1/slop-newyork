@@ -321,6 +321,8 @@ class ThirdPersonControllerManager {
   setMode(mode) {
     if (!this.entities[mode]) return;
     this.activeMode = mode;
+    const car = this.entities.car;
+    if (mode !== 'car' && car?.carState) car.carState.value.x = car.carState.value.w = 0;
   }
 
   getActiveEntity() {
@@ -356,7 +358,7 @@ class ThirdPersonControllerManager {
       ent.chassisPivot.position.y = 0;
       ent.lastCollisionSpark = null;
       for (const wheel of ent.wheels) if (wheel.isFront) wheel.steerPivot.rotation.y = 0;
-      if (ent.carState) ent.carState.value.x = 1;
+      if (ent.carState) ent.carState.value.x = ent.carState.value.w = 0;
     } else if (this.activeMode === 'cyclist') {
       ent.leanAngle = ent.leanPivot.rotation.z = 0;
     } else if (heli) {
@@ -516,7 +518,7 @@ class ThirdPersonControllerManager {
     frontPlate.position.set(0, spec.plates[0], spec.zFront + 0.006);
     chassisPivot.add(frontPlate);
 
-    // 3b. Brake lights, CHMSL & turn signals are lit by the taxi material from its carState uniform (see updateCar)
+    // 3b. Brake, reverse & turn lights are lit by the taxi material from its carState uniform (see updateCar)
     const carState = taxiLoftMat.userData.carState;
 
     // 4. Steerable & Spinning 3D LatheGeometry Tyres + Recessed 5-Spoke Alloy Wheels
@@ -1156,7 +1158,8 @@ class ThirdPersonControllerManager {
     c.chassisPivot.position.y = c.heaveY;
 
     if (c.carState) {
-      c.carState.value.x = braking || (c.speed === 0 && !throttle) ? 1 : 0;
+      c.carState.value.x = braking ? 1 : 0;
+      c.carState.value.w = c.speed < -0.2 ? 1 : 0;
     }
 
     const forwardDist = (c.position.x - prevX) * Math.sin(c.heading) + (c.position.z - prevZ) * Math.cos(c.heading);

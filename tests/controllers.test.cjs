@@ -205,6 +205,7 @@ function carDynamicsHarness(motion = {}) {
     type: 'car', position: { x: 0, y: 0, z: 0 }, heading: 0, speed: 0,
     vx: 0, vz: 0, angularVel: 0, steerAngle: 0, pitchVel: 0, rollVel: 0, heaveVel: 0, heaveY: 0, wheelSpin: 0,
     chassisPivot: { rotation: { x: 0, z: 0 }, position: { y: 0 } }, wheels: [],
+    carState: { value: { x: 0, w: 0 } },
     ...motion
   };
   controller.entities = { car };
@@ -255,6 +256,23 @@ test('car steering follows speed and reverses direction when backing up', () => 
   assert.ok(Math.abs(reverse.car.heading + slow.car.heading) < 0.05, 'forward and reverse steering remain symmetric');
   assert.equal(stopped.car.heading, 0, 'steering alone cannot rotate a stationary car');
   assert.equal(stopped.car.speed, 0);
+});
+
+test('player brake and reverse lamps follow braking and backward travel', () => {
+  for (const [speed, input, brake, reverse] of [
+    [0, null, 0, 0], [5, null, 0, 0], [5, 'forward', 0, 0], [5, 'backward', 1, 0],
+    [-5, null, 0, 1], [-5, 'backward', 0, 1], [-5, 'forward', 1, 1]
+  ]) {
+    const sim = carDynamicsHarness({ speed });
+    if (input) sim.controller.keys[input] = true;
+    sim.advance(1 / 60);
+    assert.equal(sim.car.carState.value.x, brake, `brake at speed ${speed}, input ${input}`);
+    assert.equal(sim.car.carState.value.w, reverse, `reverse at speed ${speed}, input ${input}`);
+    sim.controller.entities.person = {};
+    sim.controller.setMode('person');
+    assert.equal(sim.car.carState.value.x, 0, 'leaving the car releases its brake lights');
+    assert.equal(sim.car.carState.value.w, 0, 'the parked car no longer shows reverse lights');
+  }
 });
 
 test('releasing car steering settles smoothly and suspension leans outward', () => {
@@ -370,7 +388,7 @@ function teleportHarness(mode, colliders = [], shore = () => ({ westX: -500, eas
     mesh: pivot(),
     verticalVel: 5, vx: 3, vz: -4, angularVel: 2, steerAngle: 0.4,
     pitchVel: 3, rollVel: 4, heaveY: 0.1, heaveVel: 2, chassisPivot: pivot(),
-    lastCollisionSpark: { speed: 5 }, carState: { value: { x: 0 } }, wheelSpin: 1,
+    lastCollisionSpark: { speed: 5 }, carState: { value: { x: 1, w: 1 } }, wheelSpin: 1,
     wheels: [{ isFront: true, steerPivot: { rotation: { y: 0.4 } }, tire: { rotation: { x: 0 } } }],
     leanAngle: 0.3, leanPivot: pivot(), pedalPhase: 0.7,
     frontWheel: { rotation: { x: 0 } }, rearWheel: { rotation: { x: 0 } },
@@ -413,6 +431,8 @@ for (const mode of ['person', 'car', 'cyclist', 'helicopter']) {
       assert.equal(ent.chassisPivot.position.y, 0);
       assert.equal(ent.wheels[0].steerPivot.rotation.y, 0);
       assert.equal(ent.lastCollisionSpark, null);
+      assert.equal(ent.carState.value.x, 0);
+      assert.equal(ent.carState.value.w, 0);
     } else if (mode === 'cyclist') {
       assert.equal(ent.leanAngle, 0);
       assert.equal(ent.leanPivot.rotation.z, 0);
