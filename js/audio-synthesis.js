@@ -524,8 +524,8 @@ export function createMotorVoice(context, resources, kind, output) {
       const movement = Math.min(1.25, speed / 12);
       const rolling = Math.min(1, speed / 2);
       const pedaling = load > 0 ? 1 : 0;
-      tireLevel(Math.pow(movement, 1.35) * 0.16, now);
-      tireFrequency((900 + Math.min(1, movement) * 2100) * doppler, now);
+      tireLevel(Math.pow(movement, 1.35) * 0.05, now);
+      tireFrequency((650 + Math.min(1, movement) * 850) * doppler, now);
       // Even light pedaling engages the freewheel. Coasting clicks stand out above the quieter loaded chain.
       ratchetLevel(rolling * (1 - pedaling) * 0.38, now);
       ratchetRate(Math.max(0.01, speed * 24 / (2 * Math.PI * 0.35 * 60)) * doppler, now);
