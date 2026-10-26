@@ -1394,8 +1394,6 @@ class PersonRig {
     const sinA = Math.sqrt(Math.max(0, 1 - cosA * cosA));
     _knee.copy(hip).addScaledVector(dn, l1 * cosA).addScaledVector(_pole, l1 * sinA);
     _ankle.copy(hip).addScaledVector(dn, dist);
-    this.reachError = Math.max(this.reachError || 0, _ankle.distanceTo(ankleTarget));
-    if (this.feet[i].contact > 0.97) this.stanceReachError = Math.max(this.stanceReachError || 0, _ankle.distanceTo(ankleTarget));
     const front = _front.set(Math.sin(footYaw), 0, Math.cos(footYaw)).add(_pole);
     this.writeBone(LIMB.thigh[i], this.basis(_v2.subVectors(hip, _knee), front, _q), hip);
     this.writeBone(LIMB.shin[i], this.basis(_v2.subVectors(_knee, _ankle), front, _q), _knee);
