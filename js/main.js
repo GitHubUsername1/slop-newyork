@@ -154,6 +154,19 @@ async function initApp() {
     .map((name) => scene.getObjectByName(name))
     .filter(Boolean);
   setupSceneCulling(scene, cullingRoots, lightingSystem.sunLight.shadow);
+
+  // Initialize static world matrices once, including the chunks and shadow proxies created above.
+  // Crowd, tree and building-detail animation changes instance/pose buffers, not Object3D transforms.
+  const dynamicRoots = [
+    trafficSystem.group,
+    highwayTraffic.group,
+    scene.getObjectByName('StoreClusteredLights'),
+    scene.getObjectByName('StreetClusteredLights'),
+    ...Object.values(controllerManager.entities).map((entity) => entity.mesh),
+    controllerManager.entities.cyclist.helmet
+  ];
+  scene.updateMatrixWorld(true);
+  scene.matrixWorldAutoUpdate = false;
   markInit('culling');
 
   // On WebGPU, small InstancedMeshes (<= 1000 instances) keep their matrices in uniform buffers that three.js
@@ -684,6 +697,8 @@ async function initApp() {
     mapSystem.update();
     audioSystem.update(dt, elapsed, cameraSystem.camera, lightingSystem.activePresetId === 'midnight');
     if (warmedUp) updateSceneCulling(cameraSystem.camera.position); // the warm-up frame draws every chunk
+    // Traffic collisions can move the player after controller updates; finalize moving hierarchies here.
+    for (const root of dynamicRoots) root.updateMatrixWorld();
 
     // Render frame via TSL RenderPipeline (SSR + Bloom)
     if (!warmedUp) {
