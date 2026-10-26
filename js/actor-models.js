@@ -1869,48 +1869,48 @@ function createLoftedHelicopterMaterial() {
 
   const mat = new THREE.MeshStandardNodeMaterial();
 
+  const partId = attribute('partId', 'float');
+  const isCowling = step(abs(partId.sub(HELI_PARTS.COWLING)), 0.25);
+  const isFin = step(abs(partId.sub(HELI_PARTS.FIN)), 0.25);
+  const isSkid = step(abs(partId.sub(HELI_PARTS.SKID)), 0.25);
+  const isRotor = step(abs(partId.sub(HELI_PARTS.ROTOR)), 0.25);
+  const isExhaust = step(abs(partId.sub(HELI_PARTS.EXHAUST)), 0.25);
+  const isFuselage = step(abs(partId.sub(HELI_PARTS.FUSELAGE)), 0.25);
+
+  const p = attribute('position', 'vec3').toVar();
+  const n = attribute('normal', 'vec3').toVar();
+
+  // 1. Panoramic Wrap-Around Cockpit Windscreen & Sightseeing Side Cabin Windows (on Fuselage)
+  // Front windscreen: z in [0.95, 2.52], y in [0.98, 1.88], split by narrow center post at x = 0
+  const frontGlassOuter = roundedRect(vec2(p.z.sub(1.74), p.y.sub(1.42)), vec2(0.76, 0.42), 0.14)
+    .mul(step(0.65, p.z));
+  const centerPost = smoothstep(0.022, 0.036, abs(p.x));
+  const aPillar = smoothstep(0.028, 0.044, abs(p.z.sub(1.06)));
+  const bPillar = smoothstep(0.026, 0.042, abs(p.z.sub(0.08)));
+
+  // Lower nose chin bubble windows (for pilot downward visibility)
+  const chinWindow = roundedRect(vec2(abs(p.x).sub(0.28), p.y.sub(0.84)), vec2(0.19, 0.11), 0.04)
+    .mul(smoothstep(1.95, 2.15, p.z))
+    .mul(smoothstep(2.68, 2.52, p.z));
+
+  // Wide panoramic passenger sightseeing side windows: z in [-0.78, 1.02], y in [1.02, 1.74]
+  const sideWindow = roundedRect(vec2(p.z.sub(0.12), p.y.sub(1.38)), vec2(0.88, 0.34), 0.10)
+    .mul(step(0.45, abs(n.x)));
+
+  // Overhead cockpit eyebrow skylight windows
+  const skylight = roundedRect(vec2(abs(p.x).sub(0.32), p.z.sub(1.25)), vec2(0.20, 0.38), 0.06)
+    .mul(step(1.72, p.y));
+
+  const rawWindowMask = max(
+    max(frontGlassOuter.mul(centerPost), sideWindow),
+    max(chinWindow, skylight)
+  )
+    .mul(aPillar)
+    .mul(bPillar)
+    .mul(isFuselage)
+    .toVar();
+
   const evaluateHeliSurface = Fn(() => {
-    const partId = attribute('partId', 'float');
-    const isCowling = step(abs(partId.sub(HELI_PARTS.COWLING)), 0.25);
-    const isFin = step(abs(partId.sub(HELI_PARTS.FIN)), 0.25);
-    const isSkid = step(abs(partId.sub(HELI_PARTS.SKID)), 0.25);
-    const isRotor = step(abs(partId.sub(HELI_PARTS.ROTOR)), 0.25);
-    const isExhaust = step(abs(partId.sub(HELI_PARTS.EXHAUST)), 0.25);
-    const isFuselage = step(abs(partId.sub(HELI_PARTS.FUSELAGE)), 0.25);
-
-    const p = attribute('position', 'vec3').toVar();
-    const n = attribute('normal', 'vec3').toVar();
-
-    // 1. Panoramic Wrap-Around Cockpit Windscreen & Sightseeing Side Cabin Windows (on Fuselage)
-    // Front windscreen: z in [0.95, 2.52], y in [0.98, 1.88], split by narrow center post at x = 0
-    const frontGlassOuter = roundedRect(vec2(p.z.sub(1.74), p.y.sub(1.42)), vec2(0.76, 0.42), 0.14)
-      .mul(step(0.65, p.z));
-    const centerPost = smoothstep(0.022, 0.036, abs(p.x));
-    const aPillar = smoothstep(0.028, 0.044, abs(p.z.sub(1.06)));
-    const bPillar = smoothstep(0.026, 0.042, abs(p.z.sub(0.08)));
-
-    // Lower nose chin bubble windows (for pilot downward visibility)
-    const chinWindow = roundedRect(vec2(abs(p.x).sub(0.28), p.y.sub(0.84)), vec2(0.19, 0.11), 0.04)
-      .mul(smoothstep(1.95, 2.15, p.z))
-      .mul(smoothstep(2.68, 2.52, p.z));
-
-    // Wide panoramic passenger sightseeing side windows: z in [-0.78, 1.02], y in [1.02, 1.74]
-    const sideWindow = roundedRect(vec2(p.z.sub(0.12), p.y.sub(1.38)), vec2(0.88, 0.34), 0.10)
-      .mul(step(0.45, abs(n.x)));
-
-    // Overhead cockpit eyebrow skylight windows
-    const skylight = roundedRect(vec2(abs(p.x).sub(0.32), p.z.sub(1.25)), vec2(0.20, 0.38), 0.06)
-      .mul(step(1.72, p.y));
-
-    const rawWindowMask = max(
-      max(frontGlassOuter.mul(centerPost), sideWindow),
-      max(chinWindow, skylight)
-    )
-      .mul(aPillar)
-      .mul(bPillar)
-      .mul(isFuselage)
-      .toVar();
-
     // Rubber window weatherstripping seal around glass panes
     const rawSealMask = max(
       roundedRect(vec2(p.z.sub(1.74), p.y.sub(1.42)), vec2(0.80, 0.46), 0.15).mul(step(0.60, p.z)),
@@ -1998,30 +1998,8 @@ function createLoftedHelicopterMaterial() {
 
   mat.colorNode = evaluateHeliSurface();
 
-  mat.roughnessNode = Fn(() => {
-    const partId = attribute('partId', 'float');
-    const isFuselage = step(abs(partId.sub(HELI_PARTS.FUSELAGE)), 0.25);
-    const isSkid = step(abs(partId.sub(HELI_PARTS.SKID)), 0.25);
-    const isRotor = step(abs(partId.sub(HELI_PARTS.ROTOR)), 0.25);
-    const p = attribute('position', 'vec3');
-    const n = attribute('normal', 'vec3');
-    const frontGlass = roundedRect(vec2(p.z.sub(1.74), p.y.sub(1.42)), vec2(0.76, 0.42), 0.14).mul(step(0.65, p.z));
-    const sideGlass = roundedRect(vec2(p.z.sub(0.12), p.y.sub(1.38)), vec2(0.88, 0.34), 0.10).mul(step(0.45, abs(n.x)));
-    const isGlass = max(frontGlass, sideGlass).mul(isFuselage);
-    return mix(mix(float(0.20), float(0.05), isGlass), float(0.55), max(isSkid, isRotor));
-  })();
-
-  mat.metalnessNode = Fn(() => {
-    const partId = attribute('partId', 'float');
-    const isFuselage = step(abs(partId.sub(HELI_PARTS.FUSELAGE)), 0.25);
-    const isExhaust = step(abs(partId.sub(HELI_PARTS.EXHAUST)), 0.25);
-    const p = attribute('position', 'vec3');
-    const n = attribute('normal', 'vec3');
-    const frontGlass = roundedRect(vec2(p.z.sub(1.74), p.y.sub(1.42)), vec2(0.76, 0.42), 0.14).mul(step(0.65, p.z));
-    const sideGlass = roundedRect(vec2(p.z.sub(0.12), p.y.sub(1.38)), vec2(0.88, 0.34), 0.10).mul(step(0.45, abs(n.x)));
-    const isGlass = max(frontGlass, sideGlass).mul(isFuselage);
-    return mix(mix(float(0.35), float(0.88), isGlass), float(0.82), isExhaust);
-  })();
+  mat.roughnessNode = mix(mix(float(0.20), float(0.05), rawWindowMask), float(0.55), max(isSkid, isRotor));
+  mat.metalnessNode = mix(mix(float(0.35), float(0.88), rawWindowMask), float(0.82), isExhaust);
 
   _heliLoftedMat = mat;
   return mat;
