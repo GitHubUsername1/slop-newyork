@@ -52,7 +52,6 @@ const toWorld = (lon, lat) => {
 // =====================================================================================================================
 // 2. GEOMETRY HELPERS
 // =====================================================================================================================
-const r1 = (x) => Math.round(x * 10) / 10;
 function ringArea(r) {
   let a = 0;
   for (let i = 0, j = r.length - 1; i < r.length; j = i++) a += r[j][0] * r[i][1] - r[i][0] * r[j][1];
@@ -103,15 +102,6 @@ function rdpRing(ring, eps) {
   const a = rdp(ring.slice(i0, i1 + 1), eps);
   const b = rdp([...ring.slice(i1), ring[i0]], eps);
   return [...a.slice(0, -1), ...b.slice(0, -1)];
-}
-function pointInRing(x, z, r) {
-  let inside = false;
-  for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
-    const [xi, zi] = r[i];
-    const [xj, zj] = r[j];
-    if ((zi > z) !== (zj > z) && x < ((xj - xi) * (z - zi)) / (zj - zi) + xi) inside = !inside;
-  }
-  return inside;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -383,29 +373,6 @@ manhattan = rdpRing(manhattan, 1.6);
 if (ringArea(manhattan) > 0) manhattan.reverse(); // same winding as the old MANHATTAN_COASTLINE (negative shoelace area in x, z)
 log(`Manhattan bulkhead ring: ${manhattan.length} pts, area ${(Math.abs(ringArea(manhattan)) / 1e6).toFixed(2)} km² (DCP ${(Math.abs(ringArea(mnRing)) / 1e6).toFixed(2)})`);
 
-// Shore profile: westernmost / easternmost land x at every 2 m of z (outer crossings of the ring)
-function shoreProfile(ring, step = 2) {
-  const bb = bbox(ring);
-  const z0 = Math.ceil(bb.z0 / step) * step;
-  const n = Math.floor((bb.z1 - z0) / step) + 1;
-  const west = new Float32Array(n), east = new Float32Array(n);
-  for (let k = 0; k < n; k++) {
-    const z = z0 + k * step + 1e-3;
-    let lo = Infinity, hi = -Infinity;
-    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      const [xa, za] = ring[j];
-      const [xb, zb] = ring[i];
-      if ((za > z) !== (zb > z)) {
-        const x = xa + ((z - za) * (xb - xa)) / (zb - za);
-        if (x < lo) lo = x;
-        if (x > hi) hi = x;
-      }
-    }
-    west[k] = lo;
-    east[k] = hi;
-  }
-  return { z0, step, west, east };
-}
 
 // --- Harbour islands (Manhattan borough parts) -----------------------------------------------------------------------
 function nearestPart(rings, x, z) {
@@ -463,7 +430,6 @@ function chainCoastline(osm) {
       if (!prev) break;
       seen.add(prev.id);
       first = prev;
-      if (prev.id === w.id) break;
     }
     const nodes = [];
     let cur = first;
@@ -481,5 +447,5 @@ const coastChains = chainCoastline(load('osm_coastline.json'));
 coastChains.sort((a, b) => b.length - a.length);
 log(`OSM coastline: ${coastChains.length} chains; longest ${coastChains.slice(0, 6).map((c) => c.length).join(', ')}`);
 
-const geo = { THETA, ORIGIN, manhattan, islands, boroughs, coastChains, pierPolys, mnRing, shoreProfile };
-export { geo, toWorld, gridUV, rdp, rdpRing, ringArea, bbox, pointInRing, Raster, r1, load, log, segLines, cscl, centroid };
+const geo = { THETA, ORIGIN, manhattan, islands, boroughs, coastChains, pierPolys, mnRing };
+export { geo, toWorld, gridUV, rdp, rdpRing, ringArea, bbox, Raster, load, log, segLines, cscl, centroid };

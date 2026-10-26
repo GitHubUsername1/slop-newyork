@@ -246,7 +246,7 @@ function maskRects(m, w, h, maxRects = 8, minSide = 8) {
     for (let j = bj0; j <= bj1; j++) for (let i = bi0; i <= bi1; i++) m[j * w + i] = 0;
     if (covered > total * 0.93) break;
   }
-  return { rects, total, covered };
+  return rects;
 }
 function lotRects(c, maxRects = 8) {
   const w = c.i1 - c.i0 + 1, h = c.j1 - c.j0 + 1;
@@ -255,12 +255,8 @@ function lotRects(c, maxRects = 8) {
     const k = (c.j0 + j) * W + c.i0 + i;
     if (prop[k] && lab[k] === c.id) m[j * w + i] = 1;
   }
-  const { rects, total, covered } = maskRects(m, w, h, maxRects);
-  return {
-    rects: rects.map(([i0, i1, j0, j1]) => [R.x0 + (c.i0 + i0) * RES, R.x0 + (c.i0 + i1 + 1) * RES, R.z0 + (c.j0 + j0) * RES, R.z0 + (c.j0 + j1 + 1) * RES]),
-    propArea: total,
-    covered
-  };
+  const rects = maskRects(m, w, h, maxRects);
+  return rects.map(([i0, i1, j0, j1]) => [R.x0 + (c.i0 + i0) * RES, R.x0 + (c.i0 + i1 + 1) * RES, R.z0 + (c.j0 + j0) * RES, R.z0 + (c.j0 + j1 + 1) * RES]);
 }
 
 // --- Frontage frames of irregular islands (Lower Manhattan, Broadway's diagonals...) ---------------------------------
@@ -398,7 +394,7 @@ function blockFrames(c, poly) {
       const { lw, lh, prop, reg, cell } = vw;
       const m = new Uint8Array(lw * lh);
       for (let k = 0; k < lw * lh; k++) m[k] = prop[k] && (pass === 2 || reg[k]) && cell[k] >= 0 && !used[cell[k]] ? 1 : 0;
-      const { rects } = maskRects(m, lw, lh, pass === 1 ? 6 : 4, 12);
+      const rects = maskRects(m, lw, lh, pass === 1 ? 6 : 4, 12);
       for (const [i0, i1, j0, j1] of rects) {
         for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) if (cell[j * lw + i] >= 0) markUsed(cell[j * lw + i]);
         vw.rects.push([vw.u0 + i0, vw.u0 + i1 + 1, vw.v0 + j0, vw.v0 + j1 + 1]);
@@ -421,17 +417,14 @@ for (const c of comps) {
   if (ringArea(poly) > 0) poly.reverse();
   const bw = (c.i1 - c.i0 + 1) * RES, bd = (c.j1 - c.j0 + 1) * RES;
   const rectness = area / (bw * bd);
-  const { rects, propArea, covered } = area >= 300 ? lotRects(c) : { rects: [], propArea: 0, covered: 0 };
+  const rects = area >= 300 ? lotRects(c) : [];
   const frames = rectness <= 0.985 && area >= 300 ? blockFrames(c, poly) : null;
   blocks.push({
-    id: blocks.length,
     poly,
     area: Math.round(area),
-    bbox: [R.x0 + c.i0 * RES, R.x0 + (c.i1 + 1) * RES, R.z0 + c.j0 * RES, R.z0 + (c.j1 + 1) * RES],
     rect: rectness > 0.985,
     rects,
-    frames,
-    fill: propArea ? Math.round((covered / propArea) * 100) / 100 : 0
+    frames
   });
 }
 log(`${blocks.length} blocks (${blocks.filter((b) => b.rect).length} rectangular, ${blocks.filter((b) => !b.rects.length).length} without lots); ${small} specks dropped`);
