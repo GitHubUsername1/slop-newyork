@@ -1,6 +1,7 @@
 import * as THREE from 'three/webgpu';
 import { buildRoadNetwork } from './road-network.js';
 import { createPedestrianSystem } from './pedestrian-system.js';
+import { vehicleContact, resolveVehicleContact, sweptVehicleContact } from './vehicle-physics.js';
 import { signalPhase, walkSignal } from './city-config.js';
 import { cityUniforms, createContactShadowMaterial, createCarFlareMaterial } from './tsl-materials.js';
 import { HEADLIGHTS, createVehicleHeadlight, placeVehicleHeadlight } from './vehicle-lights.js';
@@ -138,7 +139,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, signalIntersections) {
       wait: 0, laneTimer: Math.random() * 0.5,
       dl: 0, dlv: 0, blink: 0, blinkPhase: Math.random() * 0.8,
       x: 0, z: 0, prevX: 0, prevZ: 0, tx: 0, tz: 1, nose: 0, yaw: 0, yawRate: 0, steer: 0,
-      pitch: 0, roll: 0, pitchVel: 0, rollVel: 0, vx: 0, vz: 0, yawOffset: 0, yawVel: 0,
+      pitch: 0, roll: 0, pitchVel: 0, rollVel: 0, vx: 0, vz: 0, yawOffset: 0, yawVel: 0, impactTime: 0,
       pAhead: Infinity, pRight: 0, pSpeed: 0, wheelSpin: Math.random() * Math.PI * 2
     };
   }
@@ -311,7 +312,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, signalIntersections) {
   // 3. PEDESTRIAN SYSTEM
   // =========================================================================
   const player = { active: false, entity: null, x: 0, z: 0, vx: 0, vz: 0, fx: 0, fz: 1,
-    halfW: 0.86, halfL: 2.18, push: 0.5 };
+    halfW: 0.86, halfL: 2.18 };
   const nearEdges = [];
   const nearSignals = [];
   const pedestrianSystem = createPedestrianSystem(network, {
@@ -1030,10 +1031,13 @@ function createTrafficSystem(scene, sidewalks, obstacles, signalIntersections) {
       changeLanes(v);
     }
     accelerate(v);
+    // Give the driver a moment to recover after an impact before accelerating again.
+    v.impactTime = Math.max(0, v.impactTime - dt);
+    if (v.impactTime > 0) v.acc = Math.min(0, v.acc);
     const speed = v.speed;
     v.speed = Math.max(0, v.speed + v.acc * dt);
     let ds = v.speed * dt;
-    if (ds > v.gap - 0.3) {
+    if (v.impactTime === 0 && ds > v.gap - 0.3) {
       // never into the vehicle ahead
       ds = Math.max(0, v.gap - 0.3);
       v.speed = Math.min(v.speed, v.leaderSpeed);
@@ -1123,183 +1127,144 @@ function createTrafficSystem(scene, sidewalks, obstacles, signalIntersections) {
     v.pitch = clamp(v.pitch + v.pitchVel * dt, -0.22, 0.22);
     v.rollVel += ((0.01 * v.speed * v.yawRate - v.roll) * 68.0 - v.rollVel * 10.8) * dt;
     v.roll = clamp(v.roll + v.rollVel * dt, -0.26, 0.26);
-    v.yawOffset += v.yawVel * dt;
-    v.yawVel += (-v.yawOffset * 18.0 - v.yawVel * 6.8) * dt;
-    v.yawOffset = clamp(v.yawOffset * Math.exp(-4.5 * dt), -0.85, 0.85);
+    v.yawOffset = clamp(v.yawOffset + v.yawVel * dt, -1.35, 1.35);
+    v.yawVel += (-v.yawOffset * 3.0 - v.yawVel * 2.5) * dt;
   }
 
   // Knock velocity from collisions carries v along and across its path, and dies down
   function knock(v, dt) {
     if (v.vx === 0 && v.vz === 0) return;
     shove(v, v.vx * dt, v.vz * dt);
-    const damp = Math.exp(-5.5 * dt);
+    const damp = Math.exp(-3.5 * dt);
     v.vx *= damp;
     v.vz *= damp;
     if (v.vx * v.vx + v.vz * v.vz < 1e-4) v.vx = v.vz = 0;
   }
 
-  // A knocked vehicle shunts the vehicles it runs into
-  function knockOn(v) {
-    for (const o of vehicles) {
-      if (o === v || !o.edge) continue;
-      const dx = o.x - v.x;
-      const dz = o.z - v.z;
-      const dist = Math.hypot(dx, dz);
-      if (dist > v.half + o.half || dist < 0.001) continue;
-      if (Math.abs(dz * v.tx - dx * v.tz) > v.halfWidth + o.halfWidth) continue; // side by side
-      const nx = dx / dist;
-      const nz = dz / dist;
-      const relVn = (v.vx - o.vx) * nx + (v.vz - o.vz) * nz;
-      if (relVn <= 0.5) continue;
-      const approachSpeed = (v.tx * v.speed + v.vx - o.tx * o.speed - o.vx) * nx
-        + (v.tz * v.speed + v.vz - o.tz * o.speed - o.vz) * nz;
-      reportCollision(o, v, (v.x + o.x) * 0.5, 0.56, (v.z + o.z) * 0.5, nx, nz, approachSpeed);
-      const transfer = relVn * 0.68;
-      o.vx += nx * transfer;
-      o.vz += nz * transfer;
-      v.vx -= nx * transfer * 0.45;
-      v.vz -= nz * transfer * 0.45;
-      const across = nz * o.tx - nx * o.tz; // hit from the side spins it
-      const along = nx * o.tx + nz * o.tz;
-      o.yawVel += across * Math.min(2.8, relVn * 0.22);
-      o.rollVel += across * Math.min(8.0, relVn) * 0.18;
-      o.pitchVel -= along * Math.min(8.0, relVn) * 0.14;
-      if (relVn > 2.2) spawnCollisionSparks((v.x + o.x) * 0.5, 0.56, (v.z + o.z) * 0.5, nx, nz, relVn);
-    }
+  const contactA = {}, contactB = {}, vehicleHit = {};
+  const impacted = [];
+  let collisionStep = 0;
+
+  function readTrafficBody(v, body) {
+    const heading = v.yaw + v.yawOffset;
+    body.x = v.x; body.z = v.z;
+    body.prevX = v.prevX; body.prevZ = v.prevZ;
+    body.sin = Math.sin(heading); body.cos = Math.cos(heading);
+    body.halfW = v.halfWidth;
+    body.halfL = v.bus ? 5.72 : v.isSUV ? 2.22 : 2.18;
+    body.mass = v.bus ? 12000 : v.isSUV ? 2100 : 1600;
+    body.vx = v.tx * v.speed + v.vx;
+    body.vz = v.tz * v.speed + v.vz;
+    body.angularVel = v.yawRate + v.yawVel;
   }
 
-  // Physical 4-axis 2D SAT OBB test between a vehicle (half extents halfW x halfL, heading rotY) and the player.
-  // Returns the minimum translation axis (pointing from the vehicle towards the player), or null if they don't overlap.
-  const satHit = { nx: 0, nz: 0, pen: 0, localX: 0, localZ: 0, pSin: 0, pCos: 1 };
-  function overlapWithPlayer(relX, relZ, rotY, halfW, halfL, pH, pHalfW, pHalfL) {
-    const sinY = Math.sin(rotY);
-    const cosY = Math.cos(rotY);
-    const localX = relX * cosY - relZ * sinY;
-    const localZ = relX * sinY + relZ * cosY;
-    const pSin = Math.sin(pH);
-    const pCos = Math.cos(pH);
-    const pLocalX = relX * pCos - relZ * pSin;
-    const pLocalZ = relX * pSin + relZ * pCos;
-    const alignCos = Math.abs(Math.cos(pH - rotY));
-    const alignSin = Math.abs(Math.sin(pH - rotY));
-
-    const extX = halfW + pHalfW * alignCos + pHalfL * alignSin;
-    const extZ = halfL + pHalfW * alignSin + pHalfL * alignCos;
-    const pExtX = pHalfW + halfW * alignCos + halfL * alignSin;
-    const pExtZ = pHalfL + halfW * alignSin + halfL * alignCos;
-
-    const penX = extX - Math.abs(localX);
-    const penZ = extZ - Math.abs(localZ);
-    const pPenX = pExtX - Math.abs(pLocalX);
-    const pPenZ = pExtZ - Math.abs(pLocalZ);
-    if (!(penX > 0 && penZ > 0 && pPenX > 0 && pPenZ > 0)) return null;
-
-    let nx, nz, pen;
-    if (penX < penZ) {
-      const signX = localX >= 0 ? 1 : -1;
-      nx = cosY * signX;
-      nz = -sinY * signX;
-      pen = penX;
-    } else {
-      const signZ = localZ >= 0 ? 1 : -1;
-      nx = sinY * signZ;
-      nz = cosY * signZ;
-      pen = penZ;
-    }
-    if (pPenX < pen) {
-      const signPX = pLocalX >= 0 ? 1 : -1;
-      nx = pCos * signPX;
-      nz = -pSin * signPX;
-      pen = pPenX;
-    }
-    if (pPenZ < pen) {
-      const signPZ = pLocalZ >= 0 ? 1 : -1;
-      nx = pSin * signPZ;
-      nz = pCos * signPZ;
-      pen = pPenZ;
-    }
-
-    satHit.nx = nx;
-    satHit.nz = nz;
-    satHit.pen = pen;
-    satHit.localX = localX;
-    satHit.localZ = localZ;
-    satHit.pSin = pSin;
-    satHit.pCos = pCos;
-    return satHit;
+  function writeTrafficVelocity(v, body) {
+    // Keep longitudinal momentum in the driving speed, so it does not disappear
+    // with the short-lived tire slip. Traffic can be knocked backwards too.
+    v.speed = Math.max(0, body.vx * v.tx + body.vz * v.tz);
+    v.vx = body.vx - v.tx * v.speed;
+    v.vz = body.vz - v.tz * v.speed;
+    v.yawVel = body.angularVel - v.yawRate;
   }
 
-  // Player contact: push the player and the vehicle apart (a bus hardly moves) and trade momentum, with spin,
-  // suspension kicks and sparks
-  function collideWithPlayer(v, rotY, halfW, halfL) {
+  function impactSuspension(v, nx, nz, speed) {
+    const along = nx * v.tx + nz * v.tz;
+    const across = nx * v.tz - nz * v.tx;
+    const kick = Math.min(10, speed);
+    v.pitchVel += along * kick * 0.12;
+    v.rollVel -= across * kick * 0.16;
+    v.impactTime = Math.max(v.impactTime, 0.8);
+  }
+
+  function collideWithPlayer(v) {
     const pe = player.entity;
-    const relX = pe.position.x - v.x;
-    const relZ = pe.position.z - v.z;
-    if (Math.abs(relX) > halfL + 3 || Math.abs(relZ) > halfL + 3) return;
-    const hit = overlapWithPlayer(relX, relZ, rotY, halfW, halfL, pe.heading || 0, player.halfW, player.halfL);
-    if (!hit) return;
-    const { nx, nz, pen, localX, localZ, pSin, pCos } = hit;
-    const massRatio = v.bus ? 0.15 : v.isSUV ? 0.58 : 1.0 - player.push;
-    const pPush = 1.0 - massRatio;
-    pe.position.x += nx * pen * pPush;
-    pe.position.z += nz * pen * pPush;
+    const reach = v.half + player.halfL + player.halfW;
+    const prevX = pe.prevX ?? pe.position.x, prevZ = pe.prevZ ?? pe.position.z;
+    const dx = pe.position.x - prevX - v.x + v.prevX;
+    const dz = pe.position.z - prevZ - v.z + v.prevZ;
+    if (Math.abs(pe.position.x - v.x) > reach + Math.abs(dx)
+      || Math.abs(pe.position.z - v.z) > reach + Math.abs(dz)) return;
+    const a = contactA, b = contactB, hit = vehicleHit;
+    const heading = pe.heading || 0;
+    a.x = pe.position.x; a.z = pe.position.z;
+    a.prevX = prevX; a.prevZ = prevZ;
+    a.sin = Math.sin(heading); a.cos = Math.cos(heading);
+    a.halfW = player.halfW; a.halfL = player.halfL;
+    a.mass = pe.type === 'car' ? 1700 : pe.type === 'cyclist' ? 95 : 80;
+    a.vx = a.sin * (pe.speed || 0) + (pe.vx || 0);
+    a.vz = a.cos * (pe.speed || 0) + (pe.vz || 0);
+    a.angularVel = pe.type === 'car' ? pe.angularVel || 0 : 0;
+    readTrafficBody(v, b);
+    if (!sweptVehicleContact(a, b, hit) && !vehicleContact(a, b, hit)) return;
+    const speed = resolveVehicleContact(a, b, hit);
+    const pShare = b.mass / (a.mass + b.mass);
+    pe.position.x = hit.ax + hit.nx * hit.depth * pShare;
+    pe.position.z = hit.az + hit.nz * hit.depth * pShare;
+    shove(v, hit.bx - v.x - hit.nx * hit.depth * (1 - pShare), hit.bz - v.z - hit.nz * hit.depth * (1 - pShare));
+    // A route boundary can prevent traffic taking its full share of the correction.
+    const remainder = Math.max(0, hit.depth * (1 - pShare) + (v.x - hit.bx) * hit.nx + (v.z - hit.bz) * hit.nz);
+    pe.position.x += hit.nx * remainder;
+    pe.position.z += hit.nz * remainder;
     if (pe.mesh) pe.mesh.position.copy(pe.position);
-    shove(v, -nx * pen * massRatio, -nz * pen * massRatio);
+    if (speed <= 0) return;
 
-    const sinY = Math.sin(rotY);
-    const cosY = Math.cos(rotY);
-    const pSpeed = pe.speed || 0;
-    const pvx = pSin * pSpeed + (pe.vx || 0);
-    const pvz = pCos * pSpeed + (pe.vz || 0);
-    const cvx = v.tx * v.speed + v.vx;
-    const cvz = v.tz * v.speed + v.vz;
-    const approachSpeed = (pvx - cvx) * (-nx) + (pvz - cvz) * (-nz);
-    if (approachSpeed <= 0) return;
-
-    const jImpulse = (1.0 + 0.28) * approachSpeed;
-    const cImpulse = v.bus ? approachSpeed * 0.22 : jImpulse * massRatio * 0.92;
-    v.vx -= nx * cImpulse;
-    v.vz -= nz * cImpulse;
-    v.speed *= v.bus ? 0.55 : 0.35;
-
-    const localNx = nx * cosY - nz * sinY;
-    const localNz = nx * sinY + nz * cosY;
-    if (!v.bus) {
-      const torque = localZ * localNx - localX * localNz;
-      v.yawVel -= torque * Math.min(4.2, approachSpeed * 0.26);
-      v.yawOffset = clamp(v.yawOffset - torque * Math.min(0.35, approachSpeed * 0.025), -0.65, 0.65);
-      v.pitchVel -= localNz * Math.min(12.0, approachSpeed) * 0.18;
-      v.rollVel += localNx * Math.min(12.0, approachSpeed) * 0.24;
+    writeTrafficVelocity(v, b);
+    pe.speed = a.vx * a.sin + a.vz * a.cos;
+    if (pe.type === 'car') {
+      pe.vx = a.vx - a.sin * pe.speed;
+      pe.vz = a.vz - a.cos * pe.speed;
+      pe.angularVel = a.angularVel;
+      const kick = Math.min(12, hit.impulse / a.mass);
+      pe.pitchVel += (hit.nx * a.sin + hit.nz * a.cos) * kick * 0.16;
+      pe.rollVel -= (hit.nx * a.cos - hit.nz * a.sin) * kick * 0.2;
+      pe.heaveVel += Math.min(0.7, kick * 0.06);
     }
+    impactSuspension(v, -hit.nx, -hit.nz, hit.impulse / b.mass);
+    if (pe.type !== 'person') reportCollision(pe, v, hit.x, 0.58, hit.z, hit.nx, hit.nz, speed);
+    if (speed > 2.2) spawnCollisionSparks(hit.x, 0.58, hit.z, hit.nx, hit.nz, speed);
+  }
 
-    const contactLocalX = clamp(localX, -halfW, halfW);
-    const contactLocalZ = clamp(localZ, -halfL, halfL);
-    const contactX = v.x + contactLocalX * cosY + contactLocalZ * sinY;
-    const contactZ = v.z - contactLocalX * sinY + contactLocalZ * cosY;
-    if (pe.type !== 'person') reportCollision(pe, v, contactX, v.bus ? 0.65 : 0.58, contactZ, nx, nz, approachSpeed);
-
-    if (typeof pe.speed === 'number') {
-      const headOnDot = Math.abs(pSin * nx + pCos * nz);
-      pe.speed *= 1.0 - (v.bus ? 0.68 : 0.50) * headOnDot;
-      if (pe.type === 'car') {
-        const pImpulse = v.bus ? approachSpeed * 0.65 : jImpulse * pPush * 0.48;
-        pe.vx = (pe.vx || 0) + nx * pImpulse;
-        pe.vz = (pe.vz || 0) + nz * pImpulse;
-        const pLocalNx = nx * pCos - nz * pSin;
-        const pLocalNz = nx * pSin + nz * pCos;
-        if (!v.bus) {
-          const pRelX = (contactX - pe.position.x) * pCos - (contactZ - pe.position.z) * pSin;
-          const pRelZ = (contactX - pe.position.x) * pSin + (contactZ - pe.position.z) * pCos;
-          const pTorque = pRelZ * pLocalNx - pRelX * pLocalNz;
-          pe.angularVel = (pe.angularVel || 0) + pTorque * Math.min(3.0, approachSpeed * 0.18) * pPush;
-        }
-        const kick = Math.min(v.bus ? 16.0 : 14.0, approachSpeed);
-        pe.pitchVel = (pe.pitchVel || 0) + pLocalNz * kick * (v.bus ? 0.22 : 0.18);
-        pe.rollVel = (pe.rollVel || 0) - pLocalNx * kick * (v.bus ? 0.28 : 0.24);
-        pe.heaveVel = (pe.heaveVel || 0) + Math.min(v.bus ? 1.6 : 1.4, approachSpeed * (v.bus ? 0.14 : 0.11));
+  // Only disturbed traffic needs pair contacts. Newly struck cars join the same
+  // queue, and each pair is visited once before any instance matrices are written.
+  function collideTraffic() {
+    collisionStep++;
+    impacted.length = 0;
+    for (const v of vehicles) {
+      if (v.edge && (v.impactTime > 0 || Math.abs(v.yawOffset) > 0.05 || v.vx * v.vx + v.vz * v.vz > 0.04)) {
+        v.contactStep = collisionStep;
+        impacted.push(v);
       }
     }
-    if (approachSpeed > 1.8) spawnCollisionSparks(contactX, v.bus ? 0.65 : 0.58, contactZ, nx, nz, approachSpeed);
+    for (let i = 0; i < impacted.length; i++) {
+      const v = impacted[i];
+      for (const o of vehicles) {
+        if (o === v || !o.edge || o.contactDone === collisionStep) continue;
+        const reach = v.half + o.half + 0.5;
+        const dx = v.x - o.x, dz = v.z - o.z;
+        if (Math.abs(dx) > reach + Math.abs(dx - v.prevX + o.prevX)
+          || Math.abs(dz) > reach + Math.abs(dz - v.prevZ + o.prevZ)) continue;
+        readTrafficBody(v, contactA);
+        readTrafficBody(o, contactB);
+        const hit = vehicleHit;
+        if (!sweptVehicleContact(contactA, contactB, hit) && !vehicleContact(contactA, contactB, hit)) continue;
+        const speed = resolveVehicleContact(contactA, contactB, hit);
+        const share = contactB.mass / (contactA.mass + contactB.mass);
+        shove(v, hit.ax - v.x + hit.nx * hit.depth * share, hit.az - v.z + hit.nz * hit.depth * share);
+        shove(o, hit.bx - o.x - hit.nx * hit.depth * (1 - share), hit.bz - o.z - hit.nz * hit.depth * (1 - share));
+        if (speed <= 0) continue;
+        writeTrafficVelocity(v, contactA);
+        writeTrafficVelocity(o, contactB);
+        impactSuspension(v, hit.nx, hit.nz, hit.impulse / contactA.mass);
+        impactSuspension(o, -hit.nx, -hit.nz, hit.impulse / contactB.mass);
+        reportCollision(v, o, hit.x, 0.56, hit.z, hit.nx, hit.nz, speed);
+        if (speed > 2.2) spawnCollisionSparks(hit.x, 0.56, hit.z, hit.nx, hit.nz, speed);
+        if (o.contactStep !== collisionStep) {
+          o.contactStep = collisionStep;
+          impacted.push(o);
+        }
+      }
+      v.contactDone = collisionStep;
+    }
   }
 
   // =========================================================================
@@ -1322,6 +1287,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, signalIntersections) {
     v.wait = 0;
     v.speed = v.v0 * 0.5;
     v.acc = 0;
+    v.impactTime = 0;
     v.dl = v.dlv = 0;
     v.vx = v.vz = v.yawOffset = v.yawVel = v.pitch = v.pitchVel = v.roll = v.rollVel = 0;
     locate(v);
@@ -1677,7 +1643,6 @@ function createTrafficSystem(scene, sidewalks, obstacles, signalIntersections) {
     }
     player.halfW = activeMode === 'cyclist' ? 0.35 : activeMode === 'person' ? 0.32 : 0.86;
     player.halfL = activeMode === 'cyclist' ? 0.85 : activeMode === 'person' ? 0.32 : 2.18;
-    player.push = activeMode === 'cyclist' ? 0.82 : activeMode === 'person' ? 0.88 : 0.50;
 
     // 1. Cars & buses
     // Limit attempted placements, not just successes, and rotate through the pool so an awkward location
@@ -1709,9 +1674,13 @@ function createTrafficSystem(scene, sidewalks, obstacles, signalIntersections) {
       locate(v);
       knock(v, dt);
       pose(v, dt);
-      if (player.active) collideWithPlayer(v, v.yaw + v.yawOffset, v.bus ? 1.30 : v.isSUV ? 0.92 : 0.86, v.bus ? 5.72 : v.isSUV ? 2.22 : 2.18);
-      if (v.vx * v.vx + v.vz * v.vz > 0.36) knockOn(v);
-
+    }
+    if (player.active) {
+      for (const v of vehicles) if (v.edge) collideWithPlayer(v);
+    }
+    collideTraffic();
+    for (const v of vehicles) {
+      if (!v.edge) continue;
       if (v.bus) renderBus(v);
       else renderCar(v);
     }
