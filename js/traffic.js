@@ -180,7 +180,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, signalIntersections) {
   let policeCount = 0;
 
   for (let i = 0; i < NUM_CARS; i++) {
-    const isPolice = (i % 40) === 6;
+    const isPolice = (i % 100) === 6;
     const isTaxi = !isPolice && (i % 5) === 0;
     const isSUV = !isPolice && !isTaxi && (i % 2 === 0);
 
