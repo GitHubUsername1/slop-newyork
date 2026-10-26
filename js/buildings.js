@@ -2331,6 +2331,7 @@ function buildCityBlocks(scene) {
   ];
 
   const STORE_SPOT_POOL = 28;
+  const STORE_SPOT_INTENSITY = 46 * ((0.85 - 0.15) / 0.90);
   const storeSpotPool = [];
   for (let i = 0; i < STORE_SPOT_POOL; i++) {
     const spot = new THREE.SpotLight(0xffd896, 0, 12.0, 0.84, 0.80, 1.30);
@@ -2501,9 +2502,7 @@ function buildCityBlocks(scene) {
   }
 
   function updateLights(camera) {
-    const glow = 0.85;
-    const glowFactor = Math.max(0, (glow - 0.15) / 0.90);
-    if (!camera || glowFactor <= 0.001) {
+    if (!camera) {
       for (let i = 0; i < STORE_SPOT_POOL; i++) {
         storeSpotPool[i].intensity = 0;
         storeSpotPool[i].position.set(0, -1000, 0);
@@ -2540,7 +2539,6 @@ function buildCityBlocks(scene) {
       ? Math.min(STORE_MAX_DIST, spotCandidates[STORE_SPOT_POOL].effDist)
       : STORE_MAX_DIST;
     const activeSpots = Math.min(STORE_SPOT_POOL, spotCandidates.length);
-    const spotIntensity = 46 * glowFactor;
     for (let i = 0; i < STORE_SPOT_POOL; i++) {
       const spot = storeSpotPool[i];
       if (i < activeSpots) {
@@ -2554,7 +2552,7 @@ function buildCityBlocks(scene) {
         spot.target.position.set(a.x + outX * 1.85, 0.0, a.z + outZ * 1.85);
         spot.target.updateMatrixWorld();
         spot.color.copy(storeThemeColors[themeIdx % storeThemeColors.length]);
-        spot.intensity = spotIntensity * fade;
+        spot.intensity = STORE_SPOT_INTENSITY * fade;
       } else {
         spot.intensity = 0;
         spot.position.set(0, -1000, 0);

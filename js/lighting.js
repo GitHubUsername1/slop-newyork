@@ -30,7 +30,6 @@ import { cityUniforms } from './tsl-materials.js';
 const TIME_PRESETS = {
   golden: {
     id: 'golden',
-    name: 'Golden Hour · 17:45',
     // Crisp Manhattan canyon sun slicing across avenues & intersections so buildings, cars, trees & pedestrians cast sharp shadows
     sunDir: new THREE.Vector3(-0.44, 0.58, -0.68).normalize(),
     sunColor: 0xffca92,
@@ -57,7 +56,6 @@ const TIME_PRESETS = {
   },
   midday: {
     id: 'midday',
-    name: 'Sunny Midday · 13:30',
     sunDir: new THREE.Vector3(-0.34, 0.82, -0.46).normalize(),
     sunColor: 0xfff5e8,
     sunIntensity: 6.6,
@@ -83,7 +81,6 @@ const TIME_PRESETS = {
   },
   twilight: {
     id: 'twilight',
-    name: 'Blue Hour · 19:15',
     sunDir: new THREE.Vector3(-0.52, 0.36, -0.77).normalize(),
     sunColor: 0xff9466,
     sunIntensity: 3.1,
@@ -109,7 +106,6 @@ const TIME_PRESETS = {
   },
   midnight: {
     id: 'midnight',
-    name: 'Manhattan Night · 23:00',
     sunDir: new THREE.Vector3(0.42, 0.68, -0.60).normalize(),
     sunColor: 0x8cb0e8,
     sunIntensity: 1.45,
@@ -138,7 +134,6 @@ const TIME_PRESETS = {
 class LightingSystem {
   constructor(scene, renderer = null) {
     this.scene = scene;
-    this.renderer = renderer;
     this.activePresetId = 'golden';
 
     // Assign SunLight its node implementation for WebGPURenderer (Light.registerNode since r187; r186 used the library)
@@ -300,9 +295,7 @@ class LightingSystem {
     cityUniforms.uSkySunDir.value.copy(p.sunDir);
     cityUniforms.uInteriorGlow.value = p.interiorGlow;
     cityUniforms.uRoadWetness.value = p.roadWetness;
-    if (cityUniforms.uCanyonBounce) {
-      cityUniforms.uCanyonBounce.value = p.canyonBounce;
-    }
+    cityUniforms.uCanyonBounce.value = p.canyonBounce;
 
     this.scene.environmentIntensity = p.envIntensity;
     this.bakeEnvironmentMap();

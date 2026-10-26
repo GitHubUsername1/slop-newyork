@@ -204,7 +204,7 @@ function createTrafficSystem(scene, sidewalks, obstacles, signalIntersections) {
     const car = createVehicle(false, isSUV ? 2.3 : 2.25, isSUV ? 0.92 : 0.86, isSUV ? 1.4 : 1.38, CAR_DRIVER, 10 + (i % 5) * 0.9);
     // paint as float32 values, so renderCar() can tell whether an instance slot's paint changes by comparing
     const paint = [Math.fround(col.r), Math.fround(col.g), Math.fround(col.b)];
-    Object.assign(car, { isTaxi, isPolice, isSUV, bodyType, paint });
+    Object.assign(car, { isPolice, isSUV, bodyType, paint });
     cars.push(car);
   }
 
@@ -327,8 +327,6 @@ function createTrafficSystem(scene, sidewalks, obstacles, signalIntersections) {
   const POLICE_LIGHT_POOL_SIZE = 6;
   const MAX_LIGHT_DIST = 115;
   const MAX_LIGHT_DIST_SQ = MAX_LIGHT_DIST * MAX_LIGHT_DIST;
-  const DUAL_BEAM_DIST_SQ = 96 * 96;
-  const DUAL_BEAM_MAX_VEHICLES = 44;
 
   const trafficLightsGroup = new THREE.Group();
   trafficLightsGroup.name = 'TrafficClusteredLights';

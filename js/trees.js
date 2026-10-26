@@ -47,7 +47,6 @@ const tileOrigin = (k) => [(k % 2) * TILE, (k >> 1) * TILE];
 // Spray primitives in metres (x right, y up from the card's attachment point): twigs (polylines) & leaves
 function buildSprays(rng) {
   const R = (a, b) => a + (b - a) * rng();
-  const dirOf = (a) => [Math.sin(a), Math.cos(a)]; // a = angle from straight up
 
   // Curving twig from (x, y) at angle a off vertical, len m long, curling by `curl` rad over its length
   const twig = (x, y, a, len, curl, segs = 12) => {

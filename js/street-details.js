@@ -1162,7 +1162,7 @@ function buildStreetDetails(scene) {
 
   function update(camera) {
     if (!camera) return;
-    const glow = cityUniforms && cityUniforms.uInteriorGlow ? cityUniforms.uInteriorGlow.value : 0.48;
+    const glow = cityUniforms.uInteriorGlow.value;
     // Streetlights fade in smoothly as dusk approaches (matching lampBulbGlow smoothstep(0.4, 1.1, uInteriorGlow))
     const lampScale = Math.min(1.25, Math.max(0.0, (glow - 0.36) * 1.15));
     if (lampScale <= 0.001) {

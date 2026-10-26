@@ -1033,7 +1033,6 @@ class PersonRig {
     this.s = scale;
     this.female = female ? 1 : 0;
     this.girth = girth;
-    this.hair = hair;
     this.armSwing = armSwing;
     this.stride = stride;
     this.bind = BIND[this.female];
