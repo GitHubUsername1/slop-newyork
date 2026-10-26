@@ -477,7 +477,6 @@ class NYCMapSystem {
     this.panStart = { x: 0, y: 0, cx: 0, cz: 0 };
     this.dragMoved = false;
 
-    this.hoverWorld = null;
     this.searchHighlight = '';
     this.searchPath = null;
     this.textWidths = new Map();
@@ -593,7 +592,6 @@ class NYCMapSystem {
 
         if (mx >= 0 && mx <= rect.width && my >= 0 && my <= rect.height) {
           const wPos = this.screenToWorld(mx, my, rect.width, rect.height);
-          this.hoverWorld = wPos;
           if (this.elHoverInfo) {
             this.elHoverInfo.textContent = `${getLocationLabel(wPos.x, wPos.z)} · Click to teleport here`;
           }
