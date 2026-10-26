@@ -25,12 +25,8 @@ import {
 } from 'three/tsl';
 import { mergeGeometries, mergeVertices } from 'three/addons/utils/BufferGeometryUtils.js';
 
-// js/actor-models.js
-// Realistic 3D Lofted Vehicle Geometry + TSL Materials (the skinned, animated people are in pedestrians.js)
-// Ported and adapted from Three.js webgpu_generator_city:
-// - LoftGeometry.js (skinning 3D cross-section rings with arc-length UVs, smooth seam normals & Newell caps)
-// - CarGenerator.js (lofted sedan/taxi/SUV/NYPD bodies with circular wheel arches, curved cabin windscreens,
-//   crowned roofs, LatheGeometry tyres & recessed 5-spoke alloy wheels, side mirrors, roof signs & TSL fascia/seams)
+// Vehicle geometry and materials adapted from Three.js LoftGeometry and CarGenerator.
+// Skinned character models and animation are in pedestrians.js.
 
 const _vector = new THREE.Vector3();
 const _down = new THREE.Vector3(0, -1, 0);

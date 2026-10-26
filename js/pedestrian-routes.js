@@ -1,5 +1,5 @@
-// Small, lazily connected sidewalk tracks. Junctions only connect points on the same curb island;
-// crossing the roadway is a separate, signal-controlled track owned by traffic.js.
+// Lazily connected sidewalk tracks; junctions stay on the same curb island. Crosswalk tracks are separate,
+// and pedestrian-system.js checks traffic permissions before entering them.
 function createPedestrianRoutes({ walkable, onSidewalk }, blockAt) {
   const sidewalks = new Map(), crossings = new Map(), junctions = new Map(), connections = new WeakMap();
   const point = (track, end) => ({ x: track.ax + track.ux * track.len * end, z: track.az + track.uz * track.len * end });

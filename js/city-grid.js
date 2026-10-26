@@ -67,11 +67,8 @@ let pavedPlazaRects;
 let sidewalkBlocks;
 let fdrViaduct;
 
-// js/city-grid.js
-// Builds Manhattan Island's true polygonal coastline contour, granite seawall bulkhead,
-// full-island 3D raised sidewalks & curbstones (split by Broadway's diagonal corridor),
-// organic Central Park lakes & winding drives, Roosevelt & Governors Islands,
-// Hudson & East River piers, and East River suspension bridges at 60 FPS.
+// Manhattan's coastline, raised sidewalks, parks, waterfront piers and shore highways.
+// Boroughs, harbor islands and major river bridges are built in boroughs.js.
 
 /**
  * Builds a multi-part vaulted stone-arch park bridge (Gapstow Bridge & Bow Bridge)

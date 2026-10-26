@@ -52,22 +52,9 @@ import {
 } from './city-config.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
-// js/boroughs.js
-// The rest of New York City around the simulated Manhattan grid, at true 1:1 scale on the real geography (1 unit = 1 m,
-// x = Manhattan-grid east, z = grid south, origin at 5th Ave & 42nd St), built to read as real places from the street,
-// the waterfront, the helicopter and the Empire State observatory while staying cheap at 60 FPS:
-// - Land masses from the real shorelines (New Jersey, Brooklyn, Queens, Upper Manhattan, the Bronx, Staten Island and the
-//   horizon fillers beyond the city line; Randall's, Roosevelt, Governors, Liberty, Ellis & Mill Rock islands) with
-//   granite bulkheads
-// - The Palisades cliffs (Fort Lee -> Weehawken) fading into Jersey City Heights and Bayonne as a heightfield ridge that
-//   follows the real New Jersey shore
-// - A procedural "city carpet" ground shader: per-neighbourhood street grids (a baked zone map), sidewalks, roofs,
-//   backyard trees, parks, cemeteries, rail/port yards and marsh from a land-use map, sodium street-light grids at night
-// - ~100k instanced borough buildings (one cheap window-grid shader, lit windows at night) on the same grids, plus the
-//   real skyline clusters (Jersey City, Long Island City, Downtown Brooklyn, Williamsburg, Fort Lee)
-// - Harbor islands (Roosevelt Island + tram, Governors Island forts & hills, Randall's fields, Statue of Liberty,
-//   Ellis Island) and the four East River bridges with their distinct structures and necklace lights
-// - The George Washington and Verrazzano-Narrows bridges as distant skyline landmarks
+// Surrounding land, buildings, harbor islands and bridges, with detailed skyline landmarks.
+// World frame: 1 unit = 1 m, x = Manhattan-grid east, z = grid south; origin at 5th Ave & 42nd St.
+// Distant neighborhoods share instanced buildings and procedural ground materials.
 
 // =====================================================================================================================
 // 0. REAL PLACES

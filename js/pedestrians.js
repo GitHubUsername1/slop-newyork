@@ -24,19 +24,10 @@ import {
 } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
-// js/pedestrians.js
-// Skinned, procedurally animated New Yorkers: the sidewalk crowds (traffic.js), the player's pedestrian and the
-// cyclist's rider (controllers.js).
-// - One continuous lofted body (torso & neck, trouser legs, sleeves, hands, head, hair, shoes) skinned to a 15-bone
-//   skeleton, with bind-pose morphs for build (girth), female proportions and hair volume & length; a near and a far
-//   level of detail.
-// - A whole crowd is one instanced draw per level of detail: every person's bone transforms (quaternion, translation &
-//   scale) live in a storage buffer the vertex stage skins from, and a per-person seed dresses them (TSL material).
-// - PersonRig walks a body along whatever path its owner moves it on: footsteps are planted in the world (heel strike,
-//   foot flat, heel-off & toe-off rolling over a toe joint), so feet never slide; two-bone IK bends hips & knees to
-//   reach them, the pelvis rides as high as the planted legs allow (the inverted pendulum's bob), and the pelvis
-//   rotation & sway, the chest's counter-rotation and the arm swing all follow the feet. It turns on the spot, stops
-//   with its feet together, steps up & down curbs, runs, jumps, and rides a bicycle (feet on the pedals).
+// Skinned characters for pedestrian-system.js and the player controllers.
+// Each crowd level uses one instanced draw, with 15-bone poses in a storage buffer and seeded appearance.
+// PersonRig plants footsteps in world space and uses two-bone IK to place the legs; it also handles
+// turns, curb steps, running, jumping, evasive dives and cycling.
 
 // ============================================================================
 // 1. SKELETON

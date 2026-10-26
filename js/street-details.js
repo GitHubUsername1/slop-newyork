@@ -19,14 +19,7 @@ import { createTreeField } from './trees.js';
 import { pavedPlazaRects, centralParkClearings, parkTreeSites, sidewalkBlocks, parkLampSites } from './city-grid.js';
 import { bryantParkLawn } from './landmarks.js';
 
-// js/street-details.js
-// Populates Manhattan streets with authentic NYC street furniture using InstancedMesh:
-// - Cantilevered NYC Yellow Traffic Signals at numbered-street intersections
-// - NYC DOT Cobra-head LED Streetlights
-// - Con Edison Orange/White Steam Stacks + Volumetric TSL Rising Steam Plumes
-// - MTA Subway Stair Entrances with Glowing Green Globe Lamps
-// - NYC Hot Dog / Halal Street Carts with Blue & Yellow Umbrellas
-// - Fire Hydrants, USPS Mailboxes, Litter Baskets, and Park/Street Trees
+// Instanced street furniture, traffic signals, trees and nearby light pools.
 
 function createStreetSignBladeTexture(label) {
   const c = document.createElement('canvas');
@@ -1163,7 +1156,7 @@ function buildStreetDetails(scene) {
   function update(camera) {
     if (!camera) return;
     const glow = cityUniforms.uInteriorGlow.value;
-    // Streetlights fade in smoothly as dusk approaches (matching lampBulbGlow smoothstep(0.4, 1.1, uInteriorGlow))
+    // Increase streetlight intensity toward dusk.
     const lampScale = Math.min(1.25, Math.max(0.0, (glow - 0.36) * 1.15));
     if (lampScale <= 0.001) {
       for (let i = 0; i < STREETLIGHT_SPOT_POOL; i++) {

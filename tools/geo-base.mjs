@@ -1,6 +1,6 @@
-// tools/build-geodata.mjs
-// Builds js/nyc-geodata.js: real New York geography in the simulation's 1:1 world frame, from NYC Open Data and
-// OpenStreetMap. Frame: 1 unit = 1 m, x = Manhattan-grid east, z = grid south (north = -z), origin at the centreline
+// Shared data loading, coordinate transforms and geometry helpers for the geodata generator.
+// Sources: NYC Open Data and OpenStreetMap. Frame: 1 unit = 1 m, x = Manhattan-grid east, z = grid south
+// (north = -z), origin at the centreline
 // intersection of 5th Ave & 42nd St, axes turned 29.0° from true north (the grid's measured bearing).
 //
 // Inputs (tools/data/, see tools/fetch-geodata.sh):
@@ -9,7 +9,7 @@
 //   nycparks_manhattan.json NYC Parks properties, Manhattan                    data.cityofnewyork.us enfh-gkve
 //   osm_*.json             OpenStreetMap via Overpass (Central Park features, piers, NJ coastline)
 //
-// usage: GEO_DATA=tools/data node tools/build-geodata.mjs [outFile]
+// Run tools/build-geodata.mjs to generate js/nyc-geodata.js.
 
 import fs from 'node:fs';
 import path from 'node:path';

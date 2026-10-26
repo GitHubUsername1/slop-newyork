@@ -65,15 +65,7 @@ import {
   streetZ
 } from './city-config.js';
 
-// js/tsl-materials.js
-// Photorealistic TSL (Three.js Shading Language) procedural shaders for Three.js r186 WebGPURenderer
-// Incorporating techniques from three.js webgpu_generator_city.html:
-// - Mikkelsen Surface-Gradient Hardware Derivative Bump Mapping (bumpNormal)
-// - Filter-Width Anti-Aliased Procedural Markings & Mortar (lineAA & gridLine via fwidth)
-// - True 3D Slab Ray-Marched Room & Retail Storefront Interiors (walls, ceiling lamps, floors, rugs, doors, art, shelves, curtains)
-// - Window Air-Conditioner Units with Louver Relief & Grimy Soda-Lime Window Glazing
-// - Crown-Sphere Foliage Normal Relief, Radial Interior Canopy AO & Cast-Iron Tree Grate Shading
-// - Occlusion-Aware Urban Canyon Global Illumination (aoNode + Warm Terracotta/Limestone Bounce)
+// Procedural city materials: facades and interiors, vegetation, roads, water and lighting effects.
 
 // Shared live uniforms controlled by lighting / time-of-day presets
 const cityUniforms = {
@@ -1183,9 +1175,7 @@ function createChryslerCrownMaterial() {
   return mat;
 }
 
-/**
- * GTA 6-Style Metallic Clearcoat Vehicle Paint TSL Material
- */
+// Vehicle paint with Fresnel reflections and a sharp sun highlight.
 function createCarPaintMaterial(baseHex = 0xffc218) {
   if (_carPaintCache.has(baseHex)) return _carPaintCache.get(baseHex);
   const mat = new THREE.MeshStandardNodeMaterial({
@@ -1261,10 +1251,8 @@ const TREE_WIND = vec2(0.86, 0.51);
  * (shadows follow), branches bob and leaves flutter.
  */
 function createTreeMaterial(leafAtlas) {
-  // The alpha test is given as nodes (alphaTestNode on the scene pass, maskShadowNode in the shadow maps) rather than
-  // `alphaTest`: the shadow passes copy each caster's `alphaTest` onto one shared shadow material, and every switch
-  // between 0 and > 0 bumps its version, which made three.js re-hash the node graphs of all the casters' shadow render
-  // objects every frame (~10 ms of CPU). The trees were the only alpha-tested casters.
+  // Use alpha-test nodes rather than `alphaTest`: switching that property on the shared shadow material
+  // changes its version and forces shader-cache checks for shadow casters.
   const mat = new TreeNodeMaterial({
     side: THREE.DoubleSide,
     alphaToCoverage: true,
