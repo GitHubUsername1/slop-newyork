@@ -41,7 +41,7 @@ function keyboardHarness(nyc = {}) {
   });
   // Exercise the production event handlers without constructing the scene's 3D models.
   const controller = Object.create(ThirdPersonControllerManager.prototype);
-  controller.keys = Object.fromEntries(['forward', 'backward', 'left', 'right', 'up', 'down', 'boost'].map((action) => [action, false]));
+  controller.keys = Object.fromEntries(['forward', 'backward', 'left', 'right', 'up', 'down'].map((action) => [action, false]));
   controller.bindKeyboard();
   return {
     controller,
@@ -74,14 +74,14 @@ test('releasing one movement binding preserves another held binding', () => {
   assert.equal(controller.keys.forward, false);
 });
 
-test('either Shift key keeps boost active until both are released', () => {
+test('either jump binding stays active until both are released', () => {
   const { controller, key } = keyboardHarness();
-  key('keydown', 'ShiftLeft');
-  key('keydown', 'ShiftRight');
-  key('keyup', 'ShiftLeft');
-  assert.equal(controller.keys.boost, true);
-  key('keyup', 'ShiftRight');
-  assert.equal(controller.keys.boost, false);
+  key('keydown', 'Space');
+  key('keydown', 'KeyE');
+  key('keyup', 'Space');
+  assert.equal(controller.keys.up, true);
+  key('keyup', 'KeyE');
+  assert.equal(controller.keys.up, false);
 });
 
 test('keyboard and touch input remain active independently', () => {
@@ -103,11 +103,11 @@ test('clearing touch input preserves held keyboard controls', () => {
   key('keydown', 'KeyW');
   controller.setTouchInput('forward', 0.4);
   controller.setTouchInput('left', 0.7);
-  controller.setTouchInput('boost', true);
+  controller.setTouchInput('up', true);
   controller.clearTouchInput();
   assert.equal(controller.keys.forward, true);
   assert.equal(controller.keys.left, false);
-  assert.equal(controller.keys.boost, false);
+  assert.equal(controller.keys.up, false);
   key('keyup', 'KeyW');
   assert.equal(controller.keys.forward, false);
 });
@@ -130,7 +130,7 @@ for (const interruption of ['blur', 'hidden', 'reset']) {
     key('keydown', 'KeyW');
     key('keydown', 'KeyA');
     key('keydown', 'Space');
-    key('keydown', 'ShiftLeft');
+    key('keydown', 'KeyE');
     controller.setTouchInput('forward', 0.4);
     controller.setTouchInput('backward', 0.8);
     controller.setTouchInput('down', true);
@@ -223,11 +223,15 @@ function carVelocity(car) {
   return [Math.sin(car.heading) * car.speed + car.vx, Math.cos(car.heading) * car.speed + car.vz];
 }
 
-test('car handling preserves straight-line acceleration, coasting and braking', () => {
+test('car accelerates gradually to full speed and preserves coasting and braking', () => {
   const acceleration = carDynamicsHarness();
   acceleration.controller.keys.forward = true;
-  acceleration.advance(4.2);
-  assert.ok(Math.abs(acceleration.car.speed * 3.6 - 60) < 1, 'keep the existing taxi acceleration tuning');
+  acceleration.advance(4);
+  assert.ok(Math.abs(acceleration.car.speed * 3.6 - 60) < 1, 'reach city speeds gradually');
+  acceleration.advance(5);
+  assert.ok(acceleration.car.speed > 26 && acceleration.car.speed < 28, 'acceleration tapers at higher speeds');
+  acceleration.advance(25);
+  assert.equal(acceleration.car.speed, 36, 'holding the accelerator reaches the full top speed');
 
   const coasting = carDynamicsHarness({ speed: 50 / 3.6 });
   coasting.advance(5);

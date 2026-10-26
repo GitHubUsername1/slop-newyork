@@ -36,17 +36,17 @@ const SPAWN_Z = streetZ(37);
 const groundCollider = { type: 'ground' };
 
 const CAR_DRIVE = {
-  speed: 23.5, boostSpeed: 36, reverseSpeed: 10.5, acceleration: 4.5, boostAcceleration: 5.25,
-  powerSpeed: 12.5, // Above 45 km/h, engine power limits acceleration.
+  speed: 36, reverseSpeed: 10.5, acceleration: 4.5,
+  powerSpeed: 14.5, // Above 52 km/h, engine power limits acceleration.
   rolling: 0.18, drag: 0.0012, coast: 0.6, brake: 9,
   wheelbase: 2.76, grip: 9.5, cornering: 10.5 // Wheelbase (m), tire and steering acceleration limits (m/s²).
 };
 const BICYCLE_DRIVE = {
-  speed: 12.8, boostSpeed: 19, reverseSpeed: 4.5, acceleration: 9, boostAcceleration: 13.5,
+  speed: 19, reverseSpeed: 4.5, acceleration: 9,
   rolling: 0.08, drag: 0.004, coast: 0.2, brake: 7.5 // Backward input is scaled to 0.6, giving 4.5 m/s² braking.
 };
 
-function driveSpeed(speed, throttle, boost, dt, drive) {
+function driveSpeed(speed, throttle, dt, drive) {
   // Turning can project tiny sideways motion back into speed after braking to zero.
   // Treat a crawl as stopped when changing direction, so this cannot hold the brakes forever.
   if (speed * throttle < 0 && Math.abs(speed) < 0.05) speed = 0;
@@ -58,10 +58,10 @@ function driveSpeed(speed, throttle, boost, dt, drive) {
   const coasting = Math.max(0, magnitude - deceleration * dt) / (1 + drive.drag * magnitude * dt);
   if (!throttle || braking) return Math.sign(speed) * coasting;
 
-  const limit = throttle < 0 ? drive.reverseSpeed : boost ? drive.boostSpeed : drive.speed;
-  let acceleration = boost ? drive.boostAcceleration : drive.acceleration;
+  const limit = throttle < 0 ? drive.reverseSpeed : drive.speed;
+  let acceleration = drive.acceleration;
   if (drive.powerSpeed) acceleration *= drive.powerSpeed / Math.max(drive.powerSpeed, magnitude);
-  // Releasing boost removes the extra power; existing momentum decays naturally instead of being clamped.
+  // Collision momentum above the powered limit decays naturally instead of being clamped.
   return Math.sign(throttle) * Math.min(Math.max(limit, coasting), coasting + Math.abs(throttle) * acceleration * dt);
 }
 
@@ -200,8 +200,7 @@ class ThirdPersonControllerManager {
       left: false,
       right: false,
       up: false,
-      down: false,
-      boost: false
+      down: false
     };
 
     this.entities = {
@@ -252,8 +251,7 @@ class ThirdPersonControllerManager {
       left: ['KeyA', 'ArrowLeft'],
       right: ['KeyD', 'ArrowRight'],
       up: ['Space', 'KeyE'],
-      down: ['KeyQ', 'KeyC'],
-      boost: ['ShiftLeft', 'ShiftRight']
+      down: ['KeyQ', 'KeyC']
     };
     const actionsByCode = new Map(Object.entries(bindings).flatMap(([action, codes]) => codes.map((code) => [code, action])));
     this._pressedCodes = new Set();
@@ -1060,17 +1058,19 @@ class ThirdPersonControllerManager {
 
   updatePerson(dt) {
     const p = this.entities.person;
-    const maxWalk = this.keys.boost ? 8.2 : 4.4;
+    const maxSpeed = 8.2;
     const turnRate = 2.6;
 
     let targetSpeed = 0;
-    if (this.keys.forward) targetSpeed = maxWalk * this.keys.forward;
-    else if (this.keys.backward) targetSpeed = -maxWalk * 0.65 * this.keys.backward;
+    if (this.keys.forward) targetSpeed = maxSpeed * this.keys.forward;
+    else if (this.keys.backward) targetSpeed = -maxSpeed * 0.65 * this.keys.backward;
 
     if (this.keys.left) p.heading += turnRate * dt * this.keys.left;
     if (this.keys.right) p.heading -= turnRate * dt * this.keys.right;
 
-    p.speed += (targetSpeed - p.speed) * Math.min(1, dt * 10);
+    const accelerating = Math.abs(targetSpeed) > Math.abs(p.speed) && p.speed * targetSpeed >= 0;
+    const acceleration = accelerating ? 5.5 * Math.abs(targetSpeed) / maxSpeed : 12;
+    p.speed += Math.max(-acceleration * dt, Math.min(acceleration * dt, targetSpeed - p.speed));
 
     p.position.x += Math.sin(p.heading) * p.speed * dt;
     p.position.z += Math.cos(p.heading) * p.speed * dt;
@@ -1117,7 +1117,7 @@ class ThirdPersonControllerManager {
       const vx = sin * c.speed + c.vx, vz = cos * c.speed + c.vz;
       const forward = vx * sin + vz * cos;
       const sideways = vx * cos - vz * sin;
-      const speed = driveSpeed(forward, throttle, this.keys.boost, step, CAR_DRIVE);
+      const speed = driveSpeed(forward, throttle, step, CAR_DRIVE);
       const acceleration = (speed - forward) / step;
       // Braking and cornering share tire grip; air resistance does not use it.
       const tireAcceleration = acceleration + CAR_DRIVE.drag * forward * Math.abs(forward);
@@ -1184,7 +1184,7 @@ class ThirdPersonControllerManager {
     if (this.keys.forward) throttle = this.keys.forward;
     else if (this.keys.backward) throttle = -0.6 * this.keys.backward;
 
-    b.speed = driveSpeed(b.speed, throttle, this.keys.boost, dt, BICYCLE_DRIVE);
+    b.speed = driveSpeed(b.speed, throttle, dt, BICYCLE_DRIVE);
 
     let turnInput = 0;
     if (this.keys.left) turnInput = this.keys.left;
@@ -1217,7 +1217,7 @@ class ThirdPersonControllerManager {
 
   updateHelicopter(dt, elapsed) {
     const h = this.entities.helicopter;
-    const maxHorizSpeed = this.keys.boost ? 52.0 : 32.0;
+    const maxHorizSpeed = 52.0;
     const maxVertSpeed = 16.0;
 
     let fwdInput = 0;
