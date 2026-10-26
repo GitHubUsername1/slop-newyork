@@ -47,6 +47,9 @@ const BICYCLE_DRIVE = {
 };
 
 function driveSpeed(speed, throttle, boost, dt, drive) {
+  // Turning can project tiny sideways motion back into speed after braking to zero.
+  // Treat a crawl as stopped when changing direction, so this cannot hold the brakes forever.
+  if (speed * throttle < 0 && Math.abs(speed) < 0.05) speed = 0;
   const braking = speed * throttle < 0;
   const magnitude = Math.abs(speed);
   // Extra resistance on release gives a stronger slowdown while coasting.

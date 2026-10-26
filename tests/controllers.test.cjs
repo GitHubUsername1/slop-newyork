@@ -258,6 +258,18 @@ test('car steering follows speed and reverses direction when backing up', () => 
   assert.equal(stopped.car.speed, 0);
 });
 
+test('car changes direction after braking with residual turning and sideways motion', () => {
+  for (const direction of [-1, 1]) {
+    for (const hz of [30, 60, 120]) {
+      const sim = carDynamicsHarness({ speed: -direction * 10, angularVel: direction });
+      sim.controller.keys[direction > 0 ? 'forward' : 'backward'] = true;
+      sim.controller.keys.left = true;
+      sim.advance(3, hz);
+      assert.ok(sim.car.speed * direction > 5, 'holding the new direction must release the brakes and drive away');
+    }
+  }
+});
+
 test('player brake and reverse lamps follow braking and backward travel', () => {
   for (const [speed, input, brake, reverse] of [
     [0, null, 0, 0], [5, null, 0, 0], [5, 'forward', 0, 0], [5, 'backward', 1, 0],
