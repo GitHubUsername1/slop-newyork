@@ -3011,6 +3011,7 @@ function createCarFlareMaterial() {
 export {
   cityUniforms,
   WALL_KINDS,
+  filteredPulse,
   createCurtainWallMaterial,
   createPreWarBuildingMaterial,
   createFacadeBoxes,
