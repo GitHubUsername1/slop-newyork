@@ -232,18 +232,7 @@ export function createSynthResources(context) {
       samples[i] = previous;
     }
   }
-  let mean = 0;
-  for (let i = 0; i < samples.length; i++) mean += samples[i];
-  mean /= samples.length;
-  let peak = 0;
-  let energy = 0;
-  for (let i = 0; i < samples.length; i++) {
-    samples[i] -= mean;
-    peak = Math.max(peak, Math.abs(samples[i]));
-    energy += samples[i] * samples[i];
-  }
-  const scale = Math.min(0.95 / peak, 0.30 / Math.sqrt(energy / samples.length));
-  for (let i = 0; i < samples.length; i++) samples[i] *= scale;
+  normalizeLoop(noise, 0.30, 0.95);
 
   const impulse = context.createBuffer(2, Math.round(sampleRate * 0.7), sampleRate);
   const reflections = [0.017, 0.034, 0.061, 0.097, 0.153, 0.231];
