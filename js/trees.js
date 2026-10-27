@@ -779,19 +779,20 @@ function buildTreeGeometries(speciesIndex, variant, tileMeters) {
     const gb = new TreeGeometryBuilder();
     const rng = mulberry32(seed + lod * 31337);
     const aoAt = (p) => crown.barkAO(p);
-    // Bark: lod 0 everything, lod 1 trunk + limbs + branches (coarser), lod 2 trunk + limbs as thin prisms
+    // Small twigs are drawn in the leaf cards; simplify the remaining bark with distance.
     for (const b of branches) {
-      if (lod === 0) {
-        const radial = [9, 6, 4, 3][b.level];
-        addTube(gb, b, radial, 1, aoAt, swayWeight);
-      } else if (lod === 1 && b.level <= 2) {
-        addTube(gb, b, [6, 5, 3][b.level], 2, aoAt, swayWeight);
+      if (lod === 0 && b.level <= 2) {
+        addTube(gb, b, [5, 3, 3][b.level], [2, 3, 4][b.level], aoAt, swayWeight);
+      } else if (lod === 1 && b.level <= 1) {
+        addTube(gb, b, 3, b.level === 0 ? 4 : 8, aoAt, swayWeight);
       } else if (lod === 2 && b.level <= 1) {
-        addTube(gb, b, b.level === 0 ? 5 : 3, b.level === 0 ? 4 : 6, aoAt, swayWeight);
+        addTube(gb, b, 3, b.pts.length - 1, aoAt, swayWeight);
       }
     }
-    const cards = lod === 0 ? cards0 : lod === 1 ? placeCards(sp, branches, lod, tileMeters, rng, crown) : [];
-    for (const c of cards) addCard(gb, c.at, c.up, c.face, c.size, c.tile, rng() < 0.5, rng(), crown);
+    const cards = (lod === 0 ? cards0 : lod === 1 ? placeCards(sp, branches, lod, tileMeters, rng, crown) : [])
+      .map((c) => ({ ...c, mirror: rng() < 0.5, random: rng() }))
+      .filter((_, i) => i % 2 === 0);
+    for (const c of cards) addCard(gb, c.at, c.up, c.face, c.size, c.tile, c.mirror, c.random, crown);
     for (const c of canopyCards) addCard(gb, c.at, c.up, c.face, c.size, c.tile, c.mirror, c.random, crown);
     const g = gb.build();
     g.userData = { species: sp.name, variant, lod, cards: cards.length + canopyCards.length, triangles: gb.idx.length / 3 };
