@@ -1275,8 +1275,6 @@ const TREE_WIND = vec2(0.86, 0.51);
  * (shadows follow), branches bob and leaves flutter.
  */
 function createTreeMaterial(leafAtlas) {
-  // Use alpha-test nodes rather than `alphaTest`: switching that property on the shared shadow material
-  // changes its version and forces shader-cache checks for shadow casters.
   const mat = new TreeNodeMaterial({
     side: THREE.DoubleSide,
     alphaToCoverage: true,
@@ -1315,8 +1313,7 @@ function createTreeMaterial(leafAtlas) {
 
   // Coverage: leaf cards from the atlas; bark is opaque from outside (its back faces are dropped)
   const alpha = mix(float(frontFacing), leaf.a, isLeaf);
-  mat.alphaTestNode = float(0.5);
-  mat.maskShadowNode = alpha.greaterThan(0.5);
+  mat.alphaTest = 0.5;
 
   mat.colorNode = Fn(() => {
     // Leaves: per-tree tint x atlas brightness, a share of sun-yellowed and of cooler leaves, brown twigs & stalks,

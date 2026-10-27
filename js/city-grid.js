@@ -678,8 +678,7 @@ function createWaterfrontPierMaterialsPart2(shared) {
   const isNet = step(1.5, uv().x);
   const sc = screenCoordinate;
   const dither = fract(fract(sc.x.mul(0.06711056).add(sc.y.mul(0.00583715))).mul(52.9829189));
-  const sign = new THREE.MeshStandardNodeMaterial({ roughness: 0.6, metalness: 0.0, side: THREE.DoubleSide });
-  sign.alphaTestNode = float(0.5); // not `alphaTest`, see createTreeMaterial
+  const sign = new THREE.MeshStandardNodeMaterial({ alphaTest: 0.5, roughness: 0.6, metalness: 0.0, side: THREE.DoubleSide });
   sign.colorNode = mix(tex.rgb, color(0x161b19), isNet);
   sign.opacityNode = mix(tex.a, step(dither, 0.42), isNet);
   sign.emissiveNode = tex.rgb.mul(night.mul(0.9)).mul(isNet.oneMinus());
