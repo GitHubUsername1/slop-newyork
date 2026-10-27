@@ -129,15 +129,14 @@ function boundsOf(pts) {
   return b;
 }
 
-// Appends a closed ring, always wound the same way as Path2D.rect (so overlapping rings of one path union under the
-// nonzero fill rule instead of cancelling out)
-function addRing(path, pts) {
+// Match Path2D.rect winding so overlapping outlines unite; reverse courtyard holes.
+function addRing(path, pts, hole = false) {
   if (!pts || pts.length < 3) return;
   const { n, X, Z } = accessor(pts);
   if (n < 3) return;
   let a = 0;
   for (let i = 0, j = n - 1; i < n; j = i++) a += X(j) * Z(i) - X(i) * Z(j);
-  if (a >= 0) {
+  if ((a >= 0) !== hole) {
     path.moveTo(X(0), Z(0));
     for (let i = 1; i < n; i++) path.lineTo(X(i), Z(i));
   } else {
@@ -181,8 +180,11 @@ class TiledLayer {
     return t.path;
   }
 
-  ring(pts) {
-    if (pts && pts.length > 2) addRing(this.pathFor(boundsOf(pts)), pts);
+  ring(pts, holes = []) {
+    if (!pts || pts.length < 3) return;
+    const path = this.pathFor(boundsOf(pts));
+    addRing(path, pts);
+    for (const hole of holes) addRing(path, hole, true);
   }
 
   line(pts) {
@@ -282,7 +284,7 @@ function footprintLayers(all) {
   for (const blk of all) {
     for (const f of blk.footprints || []) {
       const layer = tones[f.h > 95 ? 2 : f.h > 45 ? 1 : 0];
-      if (f.pts) layer.ring(f.pts); // turned to follow a non-grid street
+      if (f.pts) layer.ring(f.pts, f.holes);
       else layer.rect(f.x0, f.z0, f.x1, f.z1);
     }
   }

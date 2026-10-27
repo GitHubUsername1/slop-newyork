@@ -393,13 +393,14 @@ const WALL_KINDS = { shop: 0, entry: 1, rear: 2, lotLine: 3, blankStone: 4 };
  * corner and every wall fits a whole number of bays, so no window straddles a corner. `cornerPier` (m, box-local only)
  * keeps a solid band of wall at both ends of every wall (masonry corners): the bays fill the width between the piers
  * and `solid` is 1 inside the piers above the ground floor, where callers suppress windows, sills & AC units.
+ * With `footprintLocal`, createBuildingFootprints supplies the same wall frame explicitly for arbitrary polygons.
  * Box-local walls also read their treatment from the per-instance `faces` attribute (see WALL_KINDS / createFacadeBoxes):
  * `isGroundFloor` is 1 only on storefront ground floors, `door` marks the entrance bay of residential fronts, `back`
  * the plain common-brick rear & lot-line walls (tinted by the building's `tone`) and `blank` the windowless ones
  * (folded into `solid`); `wallS`, `wallW`, `wallH`, `fromTop` & `boxSeed` place things on the wall (painted signs).
  * Plain JS (not Fn) so it inlines into each node graph exactly like hand-written code.
  */
-function facadeCell(windowWidth, floorHeight, boxLocal, cornerPier = 0) {
+function facadeCell(windowWidth, floorHeight, boxLocal, cornerPier = 0, footprintLocal = false) {
   // Box-local walls are told apart by the box's own normals (createFacadeBoxes instances may be turned about +y to
   // follow a non-grid street); world-space walls by the world normal
   const nWall = boxLocal ? normalGeometry : facadeWorldNormal;
@@ -424,26 +425,31 @@ function facadeCell(windowWidth, floorHeight, boxLocal, cornerPier = 0) {
 
   if (boxLocal) {
     const box = attribute('box', 'vec4'); // width, height, depth, seed (+ the building's tone in its fraction)
-    const faces = attribute('faces', 'vec4'); // WALL_KINDS of the -x, +x, -z & +z walls
-    const wallWidth = mix(box.x, box.z, alongZ);
-    // The box-local normal's sign tells which wall this is
-    kind = mix(
-      mix(faces.z, faces.w, step(0.0, nWall.z)),
-      mix(faces.x, faces.y, step(0.0, nWall.x)),
-      alongZ
-    );
+    // Merged footprints carry normalized distance along each wall, metres below its top, and its WALL_KINDS treatment.
+    const wall = footprintLocal ? attribute('facadeWall', 'vec3') : null;
+    const wallWidth = footprintLocal ? box.x : mix(box.x, box.z, alongZ);
+    if (footprintLocal) {
+      kind = wall.z;
+    } else {
+      const faces = attribute('faces', 'vec4'); // WALL_KINDS of the -x, +x, -z & +z walls
+      kind = mix(
+        mix(faces.z, faces.w, step(0.0, nWall.z)),
+        mix(faces.x, faces.y, step(0.0, nWall.x)),
+        alongZ
+      );
+    }
     // The seed's fraction (0.1..0.9, never near an integer so floor() is stable on inexact varyings) is the tone
     tone = fract(box.w).sub(0.1).div(0.8);
     boxSeed = floor(box.w);
     // Whole-bay offset per wall so walls don't repeat each other's windows
     const wallSeed = floor(box.w.add(dot(nWall, vec3(17.0, 0.0, 37.0))));
-    const along = mix(positionGeometry.x, positionGeometry.z, alongZ).add(0.5); // 0..1 from the wall's corner
+    const along = footprintLocal ? wall.x : mix(positionGeometry.x, positionGeometry.z, alongZ).add(0.5); // 0..1 along the wall
     wallW = wallWidth;
     // Reading left to right for someone facing the wall
     const flip = mix(step(nWall.z, 0.0), step(0.0, nWall.x), alongZ);
     wallS = mix(along, float(1.0).sub(along), flip).mul(wallWidth);
     wallH = box.y;
-    fromTop = float(0.5).sub(positionGeometry.y).mul(box.y);
+    fromTop = footprintLocal ? wall.y : float(0.5).sub(positionGeometry.y).mul(box.y);
     if (cornerPier > 0) {
       const pier = min(float(cornerPier), wallWidth.mul(0.2));
       const inner = wallWidth.sub(pier.mul(2.0));
@@ -514,10 +520,11 @@ function createCurtainWallMaterial(opts = {}) {
     warmth = 0.62,
     reflectivity = 0.92,
     seed = 1.0,
-    boxLocal = false
+    boxLocal = false,
+    footprintLocal = false
   } = opts;
 
-  const cacheKey = `${glassTint}_${frameTint}_${windowWidth}_${floorHeight}_${litProbability}_${warmth}_${reflectivity}_${seed}_${boxLocal}`;
+  const cacheKey = `${glassTint}_${frameTint}_${windowWidth}_${floorHeight}_${litProbability}_${warmth}_${reflectivity}_${seed}_${boxLocal}_${footprintLocal}`;
   if (_curtainWallCache.has(cacheKey)) {
     return _curtainWallCache.get(cacheKey);
   }
@@ -543,7 +550,7 @@ function createCurtainWallMaterial(opts = {}) {
 
   // The facade cell and the apartment behind each pane are built once and shared by every output below, so the
   // shader carries a single copy of them (and evaluates the interior mapping once per pixel)
-  const facade = facadeCell(uWindowWidth, uFloorHeight, boxLocal);
+  const facade = facadeCell(uWindowWidth, uFloorHeight, boxLocal || footprintLocal, 0, footprintLocal);
   const { isRoof, uCoord, vCoord, gridV, cellId, cellUV, fw, bayWidth, isGroundFloor, blank, tone, partial, coping } = facade;
   // Pane UV inside the mullions & spandrel, the 3D apartment behind it and whether the ground-floor shop is lit
   const winUV = clamp(
@@ -713,10 +720,11 @@ function createPreWarBuildingMaterial(opts = {}) {
     crownGlowColor = 0xffe0a3,
     seed = 42.0,
     boxLocal = false,
+    footprintLocal = false,
     cornerPier = 1.2 // solid masonry at both ends of every wall above the shopfronts (box-local mode)
   } = opts;
 
-  const cacheKey = `${stoneColor}_${trimColor}_${windowWidth}_${floorHeight}_${litProbability}_${warmth}_${crownGlowHeight}_${seed}_${boxLocal}_${cornerPier}`;
+  const cacheKey = `${stoneColor}_${trimColor}_${windowWidth}_${floorHeight}_${litProbability}_${warmth}_${crownGlowHeight}_${seed}_${boxLocal}_${footprintLocal}_${cornerPier}`;
   if (_preWarCache.has(cacheKey)) {
     return _preWarCache.get(cacheKey);
   }
@@ -749,7 +757,7 @@ function createPreWarBuildingMaterial(opts = {}) {
 
   // The facade cell, the window opening and the apartment behind it are built once and shared by every output below,
   // so the shader carries a single copy of them (and evaluates the interior mapping once per pixel)
-  const facade = facadeCell(uWindowWidth, uFloorHeight, boxLocal, cornerPier);
+  const facade = facadeCell(uWindowWidth, uFloorHeight, boxLocal || footprintLocal, cornerPier, footprintLocal);
   const { isRoof, uCoord, vCoord, gridV, cellId, cellUV, fw, bayWidth, isGroundFloor, solid, back, blank, door, tone } = facade;
   const { wallS, wallW, wallH, fromTop, boxSeed, coping } = facade;
   const open = float(1.0).sub(solid).mul(float(1.0).sub(door)); // 0 in the corner piers, blank walls & doorways

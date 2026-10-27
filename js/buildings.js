@@ -41,6 +41,9 @@ import {
   WALL_KINDS
 } from './tsl-materials.js';
 import { GEO } from './nyc-geodata.js';
+import { REAL_BUILDINGS } from './building-geodata.js';
+import { createBuildingFootprints } from './building-footprints.js';
+import { polygonContains, polygonBoxOverlaps } from './building-collision.js';
 import { fdrViaduct, pavedPlazaRects, parkTreeSites, sidewalkBlocks } from './city-grid.js';
 
 // Building massing follows each block's lots and frontage frames. Footprints combine non-overlapping boxes.
@@ -245,7 +248,7 @@ function carve(r, holes, axis = 'x') {
   return out.map(([u0, u1, v0, v1]) => (flip ? rect(v0, v1, u0, u1) : rect(u0, u1, v0, v1)));
 }
 
-function buildCityBlocks(scene) {
+function buildCityBlocks(scene, landmarkColliders = []) {
   const group = new THREE.Group();
   group.name = 'ManhattanCityBlocks';
   const colliders = [];
@@ -1768,19 +1771,9 @@ function buildCityBlocks(scene) {
     }
   }
 
-  /**
-   * Populates a single Manhattan block with lots and buildings for its neighbourhood and registers its high-detail
-   * architectural features (stone cornices, water towers, rooftop bulkheads, fire escapes, awnings, storefront
-   * fascia signs, and scaffolding sheds) into the Quadtree.
-   */
-  function populateBlock(minX, maxX, minZ, maxZ, district = 'midtown') {
-    const bw = maxX - minX;
-    const bd = maxZ - minZ;
-    if (bw < (district === 'riverfront' ? 9 : minLot) || bd < minLot) return;
-    const cx = (minX + maxX) * 0.5;
-    const cz = (minZ + maxZ) * 0.5;
-
-    const blockDetail = {
+  function createBlockDetail(minX, maxX, minZ, maxZ, district) {
+    const cx = (minX + maxX) * 0.5, cz = (minZ + maxZ) * 0.5;
+    return {
       id: `${district}_${Math.round(cx)}_${Math.round(cz)}`,
       cx,
       cz,
@@ -1802,6 +1795,14 @@ function buildCityBlocks(scene) {
       facadeBoxes: [], // this block's facade boxes & the lots left empty under bridge approaches (until it's built)
       voidLots: []
     };
+  }
+
+  // Fill a block's lots and register its architectural details for streaming.
+  function populateBlock(minX, maxX, minZ, maxZ, district = 'midtown') {
+    const bw = maxX - minX;
+    const bd = maxZ - minZ;
+    if (bw < (district === 'riverfront' ? 9 : minLot) || bd < minLot) return;
+    const blockDetail = createBlockDetail(minX, maxX, minZ, maxZ, district);
     const bucketMarks = buckets.map((items) => items.length);
     rand = mulberry32((Math.imul(Math.round(minX * 4), 73856093) ^ Math.imul(Math.round(minZ * 4), 19349663) ^ 10019) >>> 0);
 
@@ -1899,22 +1900,35 @@ function buildCityBlocks(scene) {
   ].map(([name, o]) => {
     const t = LANDMARK_SITES[name];
     if (!t) return null;
-    return { x0: t.x - t.w / 2 - 3, x1: t.x + t.w / 2 + 3, z0: t.z - t.d / 2 - 3, z1: t.z + t.d / 2 + 3, ...(o || {}) };
+    return { x: t.x, z: t.z, x0: t.x - t.w / 2 - 3, x1: t.x + t.w / 2 + 3, z0: t.z - t.d / 2 - 3, z1: t.z + t.d / 2 + 3, ...(o || {}) };
   }).filter(Boolean);
+  // Keep the authored landmark models; the survey supplies the other tall buildings around them.
+  const surveyedBuildings = REAL_BUILDINGS.filter((b) => !LANDMARK_RESERVE.some((h) =>
+    b.polygons.some((p) => polygonContains({ outer: p.outer, holes: [] }, h.x, h.z)))
+    && !landmarkColliders.some((c) => b.minX < c.maxX && b.maxX > c.minX && b.minZ < c.maxZ && b.maxZ > c.minZ
+      && b.polygons.some((p) => polygonBoxOverlaps(p, (c.minX + c.maxX) / 2, (c.minZ + c.maxZ) / 2,
+        (c.maxX - c.minX) / 2, (c.maxZ - c.minZ) / 2))));
+  const landmarkReserves = [...LANDMARK_RESERVE, ...landmarkColliders.map((c) =>
+    ({ x0: c.minX, x1: c.maxX, z0: c.minZ, z1: c.maxZ }))];
+  const surveyedReserves = surveyedBuildings.map((b) => ({
+    x0: b.minX - 0.8, x1: b.maxX + 0.8, z0: b.minZ - 0.8, z1: b.maxZ + 0.8, polygons: b.polygons
+  }));
   const hitR = (a, x0, x1, z0, z1) => a.x0 < x1 && a.x1 > x0 && a.z0 < z1 && a.z1 > z0;
   // [x0, x1, z0, z1] minus the reserved rects, as up to four slabs per hole (strips across the full depth first). In a
   // frontage frame the reserves are their bounds in the frame
-  function minusReserves(r) {
-    let reserves = LANDMARK_RESERVE;
-    if (xf) {
-      reserves = LANDMARK_RESERVE.map((h) => {
-        const pts = [[h.x0, h.z0], [h.x1, h.z0], [h.x1, h.z1], [h.x0, h.z1]].map(([x, z]) => [
-          xf.px + (x - xf.px) * xf.cs - (z - xf.pz) * xf.sn,
-          xf.pz + (x - xf.px) * xf.sn + (z - xf.pz) * xf.cs
-        ]);
-        return { x0: Math.min(...pts.map((p) => p[0])), x1: Math.max(...pts.map((p) => p[0])), z0: Math.min(...pts.map((p) => p[1])), z1: Math.max(...pts.map((p) => p[1])) };
-      });
-    }
+  function reserveInFrame(h) {
+    if (!xf) return h;
+    const ring = h.polygons ? h.polygons.flatMap((p) => p.outer.map(({ x, z }) => [x, z]))
+      : [[h.x0, h.z0], [h.x1, h.z0], [h.x1, h.z1], [h.x0, h.z1]];
+    const pts = ring.map(([x, z]) => [
+      xf.px + (x - xf.px) * xf.cs - (z - xf.pz) * xf.sn,
+      xf.pz + (x - xf.px) * xf.sn + (z - xf.pz) * xf.cs
+    ]);
+    const pad = h.polygons ? 0.8 : 0;
+    return { x0: Math.min(...pts.map((p) => p[0])) - pad, x1: Math.max(...pts.map((p) => p[0])) + pad,
+      z0: Math.min(...pts.map((p) => p[1])) - pad, z1: Math.max(...pts.map((p) => p[1])) + pad };
+  }
+  function minusReserves(r, reserves) {
     let parts = [r];
     for (const h of reserves) {
       const next = [];
@@ -1959,10 +1973,12 @@ function buildCityBlocks(scene) {
   for (const b of BLOCKS) {
     if (b.park > 0.6 || b.median) continue;
     minLot = b.frames ? 12 : 15;
+    const reserves = [...landmarkReserves, ...surveyedReserves.filter((r) => hitR(r, b.minX, b.maxX, b.minZ, b.maxZ))];
     for (const [th, px, pz, rects] of b.frames || [[0, 0, 0, b.rects]]) {
       xf = th ? { th, cs: Math.cos(th), sn: Math.sin(th), px, pz } : null;
+      const frameReserves = reserves.map(reserveInFrame);
       for (const r of rects) {
-        for (const part of minusReserves(r)) {
+        for (const part of minusReserves(r, frameReserves)) {
           for (const [x0, x1, z0, z1] of splitDeep(part)) {
             if (x1 - x0 < minLot || z1 - z0 < minLot) continue;
             populateBlock(x0, x1, z0, z1, b.district);
@@ -1973,6 +1989,29 @@ function buildCityBlocks(scene) {
     }
   }
   minLot = 15;
+
+  const surveyedBuckets = materials.map(() => []);
+  for (const b of surveyedBuildings) {
+    const tone = mulberry32(Math.round(b.cx * 31 + b.cz * 17))();
+    const mat = b.year && b.year < 1945 ? (tone < 0.8 ? 0 : 1)
+      : b.year && b.year < 1980 ? (tone < 0.55 ? 0 : 4)
+        : tone < 0.6 ? 3 : 5;
+    surveyedBuckets[mat].push({ ...b, tone, seed: surveyedBuckets[mat].length * 29 });
+    const detail = createBlockDetail(b.minX, b.maxX, b.minZ, b.maxZ, 'surveyed');
+    detail.maxH = b.height + 0.22;
+    for (const polygon of b.polygons) {
+      const xs = polygon.outer.map((p) => p.x), zs = polygon.outer.map((p) => p.z);
+      const minX = Math.min(...xs), maxX = Math.max(...xs), minZ = Math.min(...zs), maxZ = Math.max(...zs);
+      colliders.push({ minX, maxX, minZ, maxZ, minY: 0, maxY: detail.maxH, polygon });
+      detail.footprints.push({ x0: minX, x1: maxX, z0: minZ, z1: maxZ, h: detail.maxH, tone, pts: polygon.outer, holes: polygon.holes });
+    }
+    allBlocks.push(detail);
+  }
+  surveyedBuckets.forEach((items, i) => {
+    if (!items.length) return;
+    const [create, opts] = facades[i];
+    group.add(createBuildingFootprints(create({ ...opts, footprintLocal: true }), items));
+  });
 
   // B6. Narrow leftover slabs no building fits on (8-26 m wide: clipped short by the shore highways or cut by Broadway)
   //     become sitting areas: a row or two of honey locusts & planes in tree pits (planted by street-details.js)

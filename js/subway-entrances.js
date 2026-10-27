@@ -1,6 +1,7 @@
 import { BLOCKS, blockAt } from './city-config.js';
 import { getStreetGroundHeight } from './city-grid.js';
 import { SUBWAY_ENTRANCES } from './subway-geodata.js';
+import { polygonBoxOverlaps } from './building-collision.js';
 
 const HALF_WIDTH = 1.26;
 const HALF_LENGTH = 3.21;
@@ -22,6 +23,7 @@ function box(x, z, hx, hz, cs = 1, sn = 0) {
 
 function overlaps(a, b) {
   if (a.maxX <= b.minX || a.minX >= b.maxX || a.maxZ <= b.minZ || a.minZ >= b.maxZ) return false;
+  if (b.polygon) return polygonBoxOverlaps(b.polygon, a.x, a.z, a.hx, a.hz, a.cs, a.sn);
   const dx = b.x - a.x, dz = b.z - a.z;
   const c = Math.abs(a.cs * b.cs + a.sn * b.sn), s = Math.abs(a.cs * b.sn - a.sn * b.cs);
   return Math.abs(dx * a.cs - dz * a.sn) < a.hx + b.hx * c + b.hz * s
@@ -49,6 +51,7 @@ function createSubwayEntrances(colliders, occupied = []) {
   }
   for (const c of [...colliders, ...occupied]) {
     if ((c.minY ?? 0) >= 2.8 || (c.maxY ?? Infinity) <= 0.22) continue;
+    if (c.polygon) { insert(c); continue; }
     const o = c.obb;
     insert(o ? box(o.cx, o.cz, o.hx, o.hz, o.cs, o.sn)
       : box((c.minX + c.maxX) / 2, (c.minZ + c.maxZ) / 2, (c.maxX - c.minX) / 2, (c.maxZ - c.minZ) / 2));

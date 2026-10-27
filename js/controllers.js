@@ -22,6 +22,7 @@ import {
 import { PersonCrowd, PersonRig } from './pedestrians.js';
 import { HEADLIGHTS, createVehicleHeadlight, placeVehicleHeadlight } from './vehicle-lights.js';
 import { bryantParkLawn } from './landmarks.js';
+import { polygonContact } from './building-collision.js';
 
 // Player models, animation and movement for walking, driving, cycling and flying.
 
@@ -75,11 +76,12 @@ function collisionBody(mode, radius, heading, margin = 0) {
   };
 }
 
-// Shared by movement and teleport clearance. World bounds reject distant boxes cheaply; the narrow phase
-// uses a circle for walking/cycling/flying and all four separating axes for an oriented car rectangle.
+// Movement and teleports share exact footprint checks after rejecting distant bounds.
+// Walking/cycling/flying use circles; cars use oriented rectangles.
 function buildingContact(c, x, y, z, body, contact) {
   if (y + body.bottom >= c.maxY || y + body.top <= (c.minY ?? 0)) return false;
   if (x + body.extX <= c.minX || x - body.extX >= c.maxX || z + body.extZ <= c.minZ || z - body.extZ >= c.maxZ) return false;
+  if (c.polygon) return polygonContact(c.polygon, x, z, body, contact);
   const o = c.obb;
   const cs = o ? o.cs : 1, sn = o ? o.sn : 0;
   const hx = o ? o.hx : (c.maxX - c.minX) * 0.5;

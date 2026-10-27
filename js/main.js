@@ -79,7 +79,7 @@ async function initApp() {
   markInit('boroughs');
   const { colliders: landmarkColliders } = buildLandmarks(scene);
   markInit('landmarks');
-  const cityBlocks = buildCityBlocks(scene);
+  const cityBlocks = buildCityBlocks(scene, landmarkColliders);
   markInit('blocks');
   const allColliders = [...landmarkColliders, ...cityBlocks.colliders, ...boroughs.colliders, ...(cityGrid.colliders || [])];
 
