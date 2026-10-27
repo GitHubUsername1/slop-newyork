@@ -17,6 +17,7 @@ import {
 import { cityUniforms, createSteamMaterial, createTreeGrateMaterial, createGodRayMaterial } from './tsl-materials.js';
 import { createTreeField } from './trees.js';
 import { createSubwayEntranceParts, createFoodCartParts } from './street-props.js';
+import { createSubwayEntrances } from './subway-entrances.js';
 import { pavedPlazaRects, centralParkClearings, parkTreeSites, sidewalkBlocks, parkLampSites } from './city-grid.js';
 import { bryantParkLawn } from './landmarks.js';
 
@@ -683,6 +684,29 @@ function buildStreetDetails(scene, colliders = []) {
   // =========================================================================
   // 4. MTA SUBWAY ENTRANCES WITH GLOWING GREEN GLOBE LAMPS
   // =========================================================================
+  const subwaySites = createSubwayEntrances(colliders, footprints);
+  const subwayMatrices = [];
+  const subwayColliders = [];
+  for (const { x, y, z, yaw } of subwaySites) {
+    const cs = Math.cos(yaw), sn = Math.sin(yaw);
+    subwayMatrices.push(new THREE.Matrix4().makeRotationY(yaw).setPosition(x, y, z));
+    const hw = 1.21, hd = 3.16;
+    const ex = Math.abs(cs) * hw + Math.abs(sn) * hd;
+    const ez = Math.abs(sn) * hw + Math.abs(cs) * hd;
+    addFootprint(x, z, ex * 2, ez * 2, true);
+    subwayColliders.push({
+      minX: x - ex, maxX: x + ex, minZ: z - ez, maxZ: z + ez, minY: 0.22, maxY: y + 2.8,
+      obb: { cx: x, cz: z, hx: hw, hz: hd, cs, sn }
+    });
+    streetPointSites.push({ x: x + sn * 2.98, y: y + 2.65, z: z + cs * 2.98, color: 0xb9e8c8, intensity: 12, dist: 8.5 });
+  }
+  for (const part of createSubwayEntranceParts()) {
+    addMatrixArrayInstanced(part.geometry, part.material, subwayMatrices, part.castShadow);
+  }
+
+  // =========================================================================
+  // 5. NYC HOT DOG / HALAL FOOD CARTS
+  // =========================================================================
   // Keep the whole prop on the sidewalk, outside building lots.
   const findPropSite = (x, z, width, depth) => {
     const hw = width * 0.5 + 0.15;
@@ -696,7 +720,8 @@ function buildStreetDetails(scene, colliders = []) {
         }
       }
       return !block.rects.some(([x0, x1, z0, z1]) =>
-        px + hw > x0 && px - hw < x1 && pz + hd > z0 && pz - hd < z1);
+        px + hw > x0 && px - hw < x1 && pz + hd > z0 && pz - hd < z1)
+        && !subwayColliders.some((b) => px + hw > b.minX && px - hw < b.maxX && pz + hd > b.minZ && pz - hd < b.maxZ);
     };
     if (fits(x, z)) return { x, z };
     for (let r = 2; r <= 40; r += 2) {
@@ -710,37 +735,6 @@ function buildStreetDetails(scene, colliders = []) {
     return null;
   };
 
-  const subwayLocations = [
-    [-16.5, 162],  // 34th St - Herald Sq / 5th Ave
-    [16.5, 162],
-    [-16.5, 16],   // 42nd St - Bryant Park / 5th Ave
-    [-126.5, 16],  // 42nd St - 6th Ave
-    [-203.5, -16], // Times Sq - 42nd St
-    [-236.5, -74], // Times Sq - 45th St
-    [126.5, -16],  // Grand Central - 42nd St
-    [203.5, -16],  // Lexington Ave / Chrysler
-    [203.5, -252], // 53rd St - Lex Ave (Citigroup)
-    [-16.5, -162], // 47th-50th Sts Rockefeller Ctr
-    [-16.5, 342]   // 23rd St - Flatiron
-  ];
-
-  const subwayMatrices = [];
-  for (const [oldX, oldZ] of subwayLocations) {
-    const raw = fromOldFrame(oldX, oldZ);
-    const site = findPropSite(raw.x, raw.z, 2.42, 6.32);
-    if (!site) continue;
-    const { x, z } = site;
-    subwayMatrices.push(new THREE.Matrix4().makeTranslation(x, 0, z));
-    addFootprint(x, z, 2.42, 6.32, true);
-    streetPointSites.push({ x, y: 2.65, z: z + 2.98, color: 0xb9e8c8, intensity: 12, dist: 8.5 });
-  }
-  for (const part of createSubwayEntranceParts()) {
-    addMatrixArrayInstanced(part.geometry, part.material, subwayMatrices, part.castShadow);
-  }
-
-  // =========================================================================
-  // 5. NYC HOT DOG / HALAL FOOD CARTS
-  // =========================================================================
   const cartLocations = [
     [-17, 152],   // Empire State corner
     [-17, 25],    // NYPL / Bryant Park
@@ -992,7 +986,7 @@ function buildStreetDetails(scene, colliders = []) {
       }
     }
   }
-  const treeField = createTreeField(scene, treePositions, colliders);
+  const treeField = createTreeField(scene, treePositions, [...colliders, ...subwayColliders]);
   group.add(treeField.group);
   sidewalkTreePositions = sidewalkTreePositions.filter((t) => treeField.sites.has(t));
   console.info(`[streetDetails] ${treeField.stats.trees} trees (${sidewalkTreePositions.length} street trees)`);

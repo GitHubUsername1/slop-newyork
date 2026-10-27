@@ -14,4 +14,4 @@ Explore other cities and community remixes in [Slop Cities](https://github.com/z
 
 The project code is available under the [MIT License](LICENSE).
 
-Geographic data: NYC Open Data and © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) (ODbL). Third-party data and dependencies retain their respective licenses.
+Geographic data: NYC Open Data, [MTA subway entrances](https://data.ny.gov/Transportation/MTA-Subway-Entrances-and-Exits-2024/i9wp-a4ja), and © [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) (ODbL). Third-party data and dependencies retain their respective licenses.
