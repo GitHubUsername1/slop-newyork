@@ -97,7 +97,7 @@ function createWalkSignalMaterial(clock) {
   return mat;
 }
 
-function buildStreetDetails(scene) {
+function buildStreetDetails(scene, colliders = []) {
   const group = new THREE.Group();
   group.name = 'ManhattanStreetDetails';
 
@@ -957,7 +957,7 @@ function buildStreetDetails(scene) {
   //        laid): along the avenue fronts (w / e edges) and, in the residential neighbourhoods, both curbs of the side
   //        streets (n / s edges) — honey locusts on the narrow streets, planes, locusts & elms on the wider ones, with
   //        random missing trees & the odd unplanted block. Never in plazas or parks.
-  const sidewalkTreePositions = [];
+  let sidewalkTreePositions = [];
   const SIDEWALK_Y = 0.22;
   const swBlocks = sidewalkBlocks || [];
   const onSidewalk = (x, z) => {
@@ -1019,7 +1019,10 @@ function buildStreetDetails(scene) {
       }
     }
   }
-  console.info(`[streetDetails] ${treePositions.length} trees (${sidewalkTreePositions.length} street trees)`);
+  const treeField = createTreeField(scene, treePositions, colliders);
+  group.add(treeField.group);
+  sidewalkTreePositions = sidewalkTreePositions.filter((t) => treeField.sites.has(t));
+  console.info(`[streetDetails] ${treeField.stats.trees} trees (${sidewalkTreePositions.length} street trees)`);
 
   const grateMat = createTreeGrateMaterial();
   const pitCurbMat = new THREE.MeshStandardNodeMaterial({ color: 0x484642, roughness: 0.88 });
@@ -1067,11 +1070,6 @@ function buildStreetDetails(scene) {
     const s = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453;
     return s - Math.floor(s);
   }
-
-  // Procedural trees (js/trees.js): species skeletons with leaf-spray cards, one instanced mesh per species, variant &
-  // level of detail, each tree's level following the camera
-  const treeField = createTreeField(scene, treePositions);
-  group.add(treeField.group);
 
   // =========================================================================
   // 8. CLUSTERED STREETLIGHTS & STREET FURNITURE LIGHT POOLS
