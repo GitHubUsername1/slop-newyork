@@ -1115,15 +1115,19 @@ class ThirdPersonControllerManager {
       // Braking and cornering share tire grip; air resistance does not use it.
       const tireAcceleration = acceleration + CAR_DRIVE.drag * forward * Math.abs(forward);
       const grip = Math.sqrt(Math.max(0, CAR_DRIVE.grip ** 2 - tireAcceleration ** 2));
+      // A handbrake slide preserves steering while reducing lateral grip; fade it out at low speed.
+      const handbrake = forward * throttle < 0 ? Math.abs(throttle) * Math.min(1, Math.abs(forward) / 5) : 0;
+      const lateralGrip = grip * (1 - 0.7 * handbrake);
+      const steeringGrip = grip + (CAR_DRIVE.grip - grip) * handbrake;
 
       // Full lock at parking speeds, progressively less steering at road speeds.
       const turn = CAR_DRIVE.wheelbase * CAR_DRIVE.cornering;
       const maxSteer = Math.atan(turn / Math.max(speed * speed, turn / Math.tan(0.60)));
       c.steerAngle += (steerInput * maxSteer - c.steerAngle) * steerResponse;
-      const yawLimit = grip / Math.max(2, Math.abs(speed));
+      const yawLimit = steeringGrip / Math.max(2, Math.abs(speed));
       const targetYaw = Math.max(-yawLimit, Math.min(yawLimit, speed * Math.tan(c.steerAngle) / CAR_DRIVE.wheelbase));
       // Collision spin remains part of the yaw velocity; the tires gradually regain control.
-      const yawStep = grip * 0.65 * step;
+      const yawStep = steeringGrip * 0.65 * step;
       c.angularVel += Math.max(-yawStep, Math.min(yawStep, (targetYaw - c.angularVel) * yawResponse));
       c.heading += c.angularVel * step;
 
@@ -1134,7 +1138,7 @@ class ThirdPersonControllerManager {
       const worldZ = cos * speed - sin * sideways;
       c.speed = worldX * nextSin + worldZ * nextCos;
       const slip = worldX * nextCos - worldZ * nextSin;
-      const correction = Math.max(-grip * step, Math.min(grip * step, -slip * tireResponse));
+      const correction = Math.max(-lateralGrip * step, Math.min(lateralGrip * step, -slip * tireResponse));
       c.vx = nextCos * (slip + correction);
       c.vz = -nextSin * (slip + correction);
       c.position.x += (nextSin * c.speed + c.vx) * step;
