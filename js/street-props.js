@@ -1,4 +1,5 @@
 import * as THREE from 'three/webgpu';
+import { float, texture } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 function colored(geometry, hex) {
@@ -110,9 +111,13 @@ export function createSubwayEntranceParts() {
     globes.push(colored(new THREE.SphereGeometry(0.23, 8, 2, 0, Math.PI * 2, 0, Math.PI / 2).translate(x, 2.57, 2.98), 0x3b9761));
     globes.push(colored(new THREE.SphereGeometry(0.23, 8, 2, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2).translate(x, 2.57, 2.98), 0xe2e6ce));
   }
+  // Alpha-test nodes rather than `alphaTest` (see createTreeMaterial): the atlas cut-outs also clip the shadows
+  const detailsMaterial = new THREE.MeshStandardNodeMaterial({ map: atlas, roughness: 0.8, alphaToCoverage: true, side: THREE.DoubleSide });
+  detailsMaterial.alphaTestNode = float(0.1);
+  detailsMaterial.maskShadowNode = texture(atlas).a.greaterThan(0.1);
   return [
     { name: 'subway-frame', geometry: merged(structure), material: new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.64, metalness: 0.35 }) },
-    { name: 'subway-details', geometry: merged(details), material: new THREE.MeshStandardNodeMaterial({ map: atlas, roughness: 0.8, alphaTest: 0.1, alphaToCoverage: true, side: THREE.DoubleSide }) },
+    { name: 'subway-details', geometry: merged(details), material: detailsMaterial },
     { name: 'subway-globes', geometry: merged(globes), material: new THREE.MeshStandardNodeMaterial({ vertexColors: true, roughness: 0.4, emissive: 0xb7d9ba, emissiveIntensity: 0.18 }), castShadow: false }
   ];
 }
