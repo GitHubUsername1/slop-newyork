@@ -2435,7 +2435,7 @@ function buildCityBlocks(scene) {
         awningInst.setMatrixAt(awningCount, dummy.matrix);
         awningInst.setColorAt(awningCount, awningPalette[a.colorIdx % awningPalette.length]);
 
-        const themeIdx = awningCount % signInsts.length;
+        const themeIdx = a.colorIdx % signInsts.length;
         if (signCounts[themeIdx] < MAX_SIGNS_PER_THEME) {
           dummy.position.set(a.x, 4.68, a.z);
           dummy.scale.set(0.28, 0.86, a.d * 0.92);
