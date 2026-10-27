@@ -16,6 +16,7 @@ import {
 } from './city-config.js';
 import { cityUniforms, createSteamMaterial, createTreeGrateMaterial, createGodRayMaterial } from './tsl-materials.js';
 import { createTreeField } from './trees.js';
+import { createSubwayEntranceParts, createFoodCartParts } from './street-props.js';
 import { pavedPlazaRects, centralParkClearings, parkTreeSites, sidewalkBlocks, parkLampSites } from './city-grid.js';
 import { bryantParkLawn } from './landmarks.js';
 
@@ -682,12 +683,32 @@ function buildStreetDetails(scene, colliders = []) {
   // =========================================================================
   // 4. MTA SUBWAY ENTRANCES WITH GLOWING GREEN GLOBE LAMPS
   // =========================================================================
-  const subwayRailingMat = new THREE.MeshStandardNodeMaterial({
-    color: 0x1a3826, // Classic MTA Subway forest green ironwork
-    roughness: 0.5,
-    metalness: 0.65
-  });
-  const subwayGlobeMat = new THREE.MeshBasicNodeMaterial({ color: 0x55ff88 });
+  // Keep the whole prop on the sidewalk, outside building lots.
+  const findPropSite = (x, z, width, depth) => {
+    const hw = width * 0.5 + 0.15;
+    const hd = depth * 0.5 + 0.15;
+    const fits = (px, pz) => {
+      const block = blockAt(px, pz);
+      if (!block || block.median) return false;
+      for (const dx of [-hw, 0, hw]) {
+        for (const dz of [-hd, 0, hd]) {
+          if (blockAt(px + dx, pz + dz) !== block) return false;
+        }
+      }
+      return !block.rects.some(([x0, x1, z0, z1]) =>
+        px + hw > x0 && px - hw < x1 && pz + hd > z0 && pz - hd < z1);
+    };
+    if (fits(x, z)) return { x, z };
+    for (let r = 2; r <= 40; r += 2) {
+      for (let k = 0; k < 16; k++) {
+        const angle = k / 16 * Math.PI * 2;
+        const px = x + Math.cos(angle) * r;
+        const pz = z + Math.sin(angle) * r;
+        if (fits(px, pz)) return { x: px, z: pz };
+      }
+    }
+    return null;
+  };
 
   const subwayLocations = [
     [-16.5, 162],  // 34th St - Herald Sq / 5th Ave
@@ -703,65 +724,23 @@ function buildStreetDetails(scene, colliders = []) {
     [-16.5, 342]   // 23rd St - Flatiron
   ];
 
-  const subwayRailMatrices = [];
-  const subwayPostMatrices = [];
-  const subwayGlobeMatrices = [];
-
-  const snapToCurbIsland = (x, z, pad = 1.1) => {
-    if (isOnCurbIsland(x, z, pad)) return { x, z };
-    for (let r = 2; r <= 18; r += 2) {
-      for (let k = 0; k < 16; k++) {
-        const ang = (k / 16) * Math.PI * 2;
-        const nx = x + Math.cos(ang) * r;
-        const nz = z + Math.sin(ang) * r;
-        if (isOnCurbIsland(nx, nz, pad)) return { x: nx, z: nz };
-      }
-    }
-    return { x, z };
-  };
-
+  const subwayMatrices = [];
   for (const [oldX, oldZ] of subwayLocations) {
-    const raw = fromOldFrame(oldX, oldZ); // (authored on the former compressed grid)
-    const { x: subX, z: subZ } = snapToCurbIsland(raw.x, raw.z, 1.2);
-    // Iron railing enclosure around sidewalk stairs
-    dummy.position.set(subX, 0.8, subZ);
-    dummy.rotation.set(0, 0, 0);
-    dummy.scale.set(2.1, 1.15, 6.2);
-    dummy.updateMatrix();
-    subwayRailMatrices.push(dummy.matrix.clone());
-    addFootprint(subX, subZ, 2.1, 6.2);
-
-    // Twin MTA Green Globe Post Lamps at stair entrance
-    for (const ox of [-0.85, 0.85]) {
-      dummy.position.set(subX + ox, 1.9, subZ + 2.9);
-      dummy.scale.set(0.09, 1.4, 0.09);
-      dummy.updateMatrix();
-      subwayPostMatrices.push(dummy.matrix.clone());
-
-      dummy.position.set(subX + ox, 2.7, subZ + 2.9);
-      dummy.scale.set(0.26, 0.26, 0.26);
-      dummy.updateMatrix();
-      subwayGlobeMatrices.push(dummy.matrix.clone());
-    }
-    streetPointSites.push({ x: subX, y: 2.75, z: subZ + 2.9, color: 0x48ff80, intensity: 18, dist: 8.5 });
+    const raw = fromOldFrame(oldX, oldZ);
+    const site = findPropSite(raw.x, raw.z, 2.42, 6.32);
+    if (!site) continue;
+    const { x, z } = site;
+    subwayMatrices.push(new THREE.Matrix4().makeTranslation(x, 0, z));
+    addFootprint(x, z, 2.42, 6.32, true);
+    streetPointSites.push({ x, y: 2.65, z: z + 2.98, color: 0xb9e8c8, intensity: 12, dist: 8.5 });
   }
-  addMatrixArrayInstanced(unitBox, subwayRailingMat, subwayRailMatrices);
-  addMatrixArrayInstanced(unitCyl, subwayRailingMat, subwayPostMatrices);
-  addMatrixArrayInstanced(new THREE.SphereGeometry(1, 10, 10), subwayGlobeMat, subwayGlobeMatrices, false);
+  for (const part of createSubwayEntranceParts()) {
+    addMatrixArrayInstanced(part.geometry, part.material, subwayMatrices, part.castShadow);
+  }
 
   // =========================================================================
-  // 5. NYC HOT DOG / HALAL FOOD CARTS WITH UMBRELLAS & SIDEWALK PROPS
+  // 5. NYC HOT DOG / HALAL FOOD CARTS
   // =========================================================================
-  const cartSteelMat = new THREE.MeshStandardNodeMaterial({
-    color: 0xd0d8e0,
-    roughness: 0.25,
-    metalness: 0.88
-  });
-  const umbrellaMat = new THREE.MeshStandardNodeMaterial({
-    color: 0x1e64d8, // Classic NYC blue & yellow umbrella
-    roughness: 0.6
-  });
-
   const cartLocations = [
     [-17, 152],   // Empire State corner
     [-17, 25],    // NYPL / Bryant Park
@@ -775,25 +754,19 @@ function buildStreetDetails(scene, colliders = []) {
     [-17, 325]    // Flatiron Plaza
   ];
 
-  const cartBoxMatrices = [];
-  const umbrellaMatrices = [];
+  const cartMatrices = [];
   for (const [ox, oz] of cartLocations) {
-    const raw = fromOldFrame(ox, oz); // (authored on the former compressed grid)
-    const { x: cx, z: cz } = snapToCurbIsland(raw.x, raw.z, 1.1);
-    dummy.position.set(cx, 0.85, cz);
-    dummy.rotation.set(0, 0, 0);
-    dummy.scale.set(1.5, 1.25, 2.2);
-    dummy.updateMatrix();
-    cartBoxMatrices.push(dummy.matrix.clone());
-
-    dummy.position.set(cx, 2.55, cz);
-    dummy.scale.set(1.7, 0.75, 1.7);
-    dummy.updateMatrix();
-    umbrellaMatrices.push(dummy.matrix.clone());
-    streetPointSites.push({ x: cx, y: 2.15, z: cz, color: 0xffdf9e, intensity: 28, dist: 9.5 });
+    const raw = fromOldFrame(ox, oz);
+    const site = findPropSite(raw.x, raw.z, 3.5, 3.5);
+    if (!site) continue;
+    const { x, z } = site;
+    cartMatrices.push(new THREE.Matrix4().makeTranslation(x, 0, z));
+    addFootprint(x, z, 1.5, 2.2);
+    streetPointSites.push({ x, y: 2.15, z, color: 0xffdf9e, intensity: 28, dist: 9.5 });
   }
-  addMatrixArrayInstanced(unitBox, cartSteelMat, cartBoxMatrices);
-  addMatrixArrayInstanced(new THREE.ConeGeometry(1, 1, 8), umbrellaMat, umbrellaMatrices);
+  for (const part of createFoodCartParts()) {
+    addMatrixArrayInstanced(part.geometry, part.material, cartMatrices, part.castShadow);
+  }
 
   // =========================================================================
   // 6. FIRE HYDRANTS & USPS BLUE MAILBOXES ALONG CURBS (INSTANCED)
