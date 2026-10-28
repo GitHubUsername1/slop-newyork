@@ -8,16 +8,19 @@ const source = ['traffic.js', 'pedestrian-system.js']
   .map((file) => readFileSync(join(__dirname, '../js', file), 'utf8')).join('\n');
 // Exercise the production lane query and player snapshot without creating the WebGPU scene.
 const laneQuery = source.match(/  function playerInLane\(lane, pl\) \{[\s\S]*?\n  \}/)?.[0];
+const boxRun = source.match(/const HWY_BOX_RUN = \d+;/)?.[0];
 const playerSnapshot = source.match(/    const pl = entity[\s\S]*?\n    \} : null;/)?.[0];
 assert.ok(laneQuery, 'traffic lane query is present');
+assert.ok(boxRun, 'traffic lane bounds run length is present');
 assert.ok(playerSnapshot, 'traffic player snapshot is present');
-const { playerInLane, snapshot } = vm.runInNewContext(`
+const { playerInLane, snapshot, HWY_BOX_RUN } = vm.runInNewContext(`
+  ${boxRun}
   ${laneQuery}
   function snapshot(entity, mode) {
     ${playerSnapshot}
     return pl;
   }
-  ({ playerInLane, snapshot });
+  ({ playerInLane, snapshot, HWY_BOX_RUN });
 `);
 
 function lane(points) {
@@ -26,12 +29,14 @@ function lane(points) {
     const a = points[i - 1], b = points[i];
     cum.push(cum[i - 1] + Math.hypot(b.x - a.x, b.y - a.y, b.z - a.z));
   }
-  return {
-    pts: points,
-    cum,
-    box: [Math.min(...points.map((p) => p.x)), Math.max(...points.map((p) => p.x)),
-      Math.min(...points.map((p) => p.z)), Math.max(...points.map((p) => p.z))]
-  };
+  // Bounds per run of HWY_BOX_RUN segments, as createHighwayTraffic lays them out
+  const box = [];
+  for (let s = 0; s + 1 < points.length; s += HWY_BOX_RUN) {
+    const run = points.slice(s, Math.min(points.length, s + HWY_BOX_RUN + 1));
+    box.push(Math.min(...run.map((p) => p.x)), Math.max(...run.map((p) => p.x)),
+      Math.min(...run.map((p) => p.z)), Math.max(...run.map((p) => p.z)));
+  }
+  return { pts: points, cum, box };
 }
 
 function player(x, y, z, mode = 'car') {
@@ -71,6 +76,19 @@ test('sloped lanes use horizontal projection and compare interpolated road heigh
   assert.equal(playerInLane(road, player(50, 0, 0)), null);
   assert.equal(playerInLane(road, player(100.1, 7.6, 0)), null);
   assert.equal(playerInLane(road, player(50, 3.8, 2.001)), null);
+});
+
+test('long lanes find the player in any run of segments and ignore players inside their overall bounds', () => {
+  // A U-shaped lane (up one shore, back down the other) with many segments: its overall bounds cover the middle
+  const pts = [];
+  for (let i = 0; i <= 40; i++) pts.push({ x: 0, y: 0, z: i * 10 });
+  for (let i = 0; i <= 40; i++) pts.push({ x: 200, y: 0, z: 400 - i * 10 });
+  const road = lane(pts);
+  assert.ok(road.box.length > 4, 'the lane is bounded in several runs');
+  const late = playerInLane(road, player(200, 0, 55));
+  close(late.u, road.cum[75] + 5);
+  close(playerInLane(road, player(0, 0, 333)).u, 333);
+  assert.equal(playerInLane(road, player(100, 0, 200)), null);
 });
 
 test('overlapping road segments select the matching elevation', () => {

@@ -1879,6 +1879,7 @@ const HWY_NEAR_LOD = 170;
 const HWY_MID_LOD = 450;
 const HWY_FAR_CULL = 1600;
 const HWY_RAMP = 32; // the dip at the lane ends: 2.4 m down over this many metres
+const HWY_BOX_RUN = 16; // lane segments per bounding box of the player test
 
 function createHighwayTraffic(scene, lanes) {
   const group = new THREE.Group();
@@ -1957,8 +1958,13 @@ function createHighwayTraffic(scene, lanes) {
       const b = P[Math.min(P.length - 1, i + 1)];
       return Math.atan2(b.x - a.x, b.z - a.z);
     });
-    lane.box = [Infinity, -Infinity, Infinity, -Infinity];
-    for (const p of P) lane.box = [Math.min(lane.box[0], p.x), Math.max(lane.box[1], p.x), Math.min(lane.box[2], p.z), Math.max(lane.box[3], p.z)];
+    // Bounds of every run of HWY_BOX_RUN segments ([x0, x1, z0, z1] after one another): the shore lanes, joined
+    // through the Battery Park Underpass, span the whole island, so the player test visits just the runs nearby
+    lane.box = [];
+    for (let s = 0; s + 1 < P.length; s += HWY_BOX_RUN) {
+      const run = P.slice(s, Math.min(P.length, s + HWY_BOX_RUN + 1));
+      lane.box.push(Math.min(...run.map((p) => p.x)), Math.max(...run.map((p) => p.x)), Math.min(...run.map((p) => p.z)), Math.max(...run.map((p) => p.z)));
+    }
     lane.cars = [];
     for (let u = rand() * 30; u < lane.len - 12; u += 24 + rand() * 50) {
       const h = rand();
@@ -2072,23 +2078,26 @@ function createHighwayTraffic(scene, lanes) {
   // The player's arc position and speed along `lane` if they are in it (within 2 m of the centre line and near
   // its road height, not on its underground stretches), else null
   function playerInLane(lane, pl) {
-    const [x0, x1, z0, z1] = lane.box;
-    if (pl.x < x0 - 3 || pl.x > x1 + 3 || pl.z < z0 - 3 || pl.z > z1 + 3) return null;
+    const B = lane.box;
     const P = lane.pts;
-    for (let i = 0; i + 1 < P.length; i++) {
-      if (P[i].y < -1 && P[i + 1].y < -1) continue;
-      const ax = P[i].x, az = P[i].z;
-      const sx = P[i + 1].x - ax, sz = P[i + 1].z - az;
-      const horizontalLengthSq = sx * sx + sz * sz;
-      if (horizontalLengthSq === 0) continue;
-      const L = lane.cum[i + 1] - lane.cum[i];
-      const t = ((pl.x - ax) * sx + (pl.z - az) * sz) / horizontalLengthSq;
-      if (t < 0 || t > 1) continue;
-      const y = P[i].y + (P[i + 1].y - P[i].y) * t;
-      if (Math.abs(pl.y - y) >= 2.6) continue;
-      if (Math.abs((pl.z - az) * sx - (pl.x - ax) * sz) / Math.sqrt(horizontalLengthSq) < 2.0) {
-        // Convert horizontal progress to distance along the sloped lane, as with u above.
-        return { u: lane.cum[i] + t * L, v: Math.max(0, ((pl.vx * sx + pl.vz * sz) / horizontalLengthSq) * L) };
+    for (let r = 0; r < B.length; r += 4) {
+      if (pl.x < B[r] - 3 || pl.x > B[r + 1] + 3 || pl.z < B[r + 2] - 3 || pl.z > B[r + 3] + 3) continue;
+      const end = Math.min(P.length - 1, (r / 4 + 1) * HWY_BOX_RUN);
+      for (let i = (r / 4) * HWY_BOX_RUN; i < end; i++) {
+        if (P[i].y < -1 && P[i + 1].y < -1) continue;
+        const ax = P[i].x, az = P[i].z;
+        const sx = P[i + 1].x - ax, sz = P[i + 1].z - az;
+        const horizontalLengthSq = sx * sx + sz * sz;
+        if (horizontalLengthSq === 0) continue;
+        const L = lane.cum[i + 1] - lane.cum[i];
+        const t = ((pl.x - ax) * sx + (pl.z - az) * sz) / horizontalLengthSq;
+        if (t < 0 || t > 1) continue;
+        const y = P[i].y + (P[i + 1].y - P[i].y) * t;
+        if (Math.abs(pl.y - y) >= 2.6) continue;
+        if (Math.abs((pl.z - az) * sx - (pl.x - ax) * sz) / Math.sqrt(horizontalLengthSq) < 2.0) {
+          // Convert horizontal progress to distance along the sloped lane, as with u above.
+          return { u: lane.cum[i] + t * L, v: Math.max(0, ((pl.vx * sx + pl.vz * sz) / horizontalLengthSq) * L) };
+        }
       }
     }
     return null;
