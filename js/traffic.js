@@ -7,20 +7,22 @@ import { cityUniforms, createContactShadowMaterial, createCarFlareMaterial } fro
 import { HEADLIGHTS, createVehicleHeadlight, placeVehicleHeadlight } from './vehicle-lights.js';
 import {
   BODY_SPECS,
-  BUS_SPEC,
   buildCarGeometry,
   buildCarProxyGeometry,
   buildSteerableWheelGeo,
   createLoftedCarMaterial,
   carStyleCode,
   buildLightbarGeometry,
-  createLightbarMaterial,
+  createLightbarMaterial
+} from './cars.js';
+import {
+  BUS_SPEC,
   buildLoftedBusBodyGeometry,
   buildBusSignGeometry,
   buildBusWheelGeo,
   createBusWheelMaterial,
   createLoftedBusMaterial
-} from './actor-models.js';
+} from './bus.js';
 
 // Cars and buses follow the road graph, obey signals, yield at crossings and react to collisions.
 // Vehicles replenish around the player; pedestrian-system.js manages the nearby walking population.

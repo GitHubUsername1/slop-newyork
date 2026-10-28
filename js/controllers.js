@@ -14,12 +14,14 @@ import {
   buildCarSidePatch,
   buildSteerableWheelGeo,
   carTipZ,
-  createLoftedCarMaterial,
+  createLoftedCarMaterial
+} from './cars.js';
+import {
   buildHelicopterBodyGeometry,
   buildHelicopterMainRotorGeometry,
   buildHelicopterTailRotorGeometry,
   createLoftedHelicopterMaterial
-} from './actor-models.js';
+} from './helicopter.js';
 import { PersonCrowd, PersonRig } from './pedestrians.js';
 import { HEADLIGHTS, createVehicleHeadlight, placeVehicleHeadlight } from './vehicle-lights.js';
 import { bryantParkLawn } from './landmarks.js';
