@@ -35,10 +35,11 @@ import {
   instanceIndex
 } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { LoftGeometry, part } from './loft-geometry.js';
+import { LoftGeometry } from 'three/addons/geometries/LoftGeometry.js';
+import { part, mirrorSection, roundedRectShape, roundedBox } from './vehicles.js';
 
-// Car geometry and materials, adapted from Three.js CarGenerator. The bus (bus.js) and the helicopter
-// (helicopter.js) are lofted with the same machinery (loft-geometry.js).
+// Car geometry and materials, lofted with LoftGeometry and adapted from Three.js CarGenerator. The bus (bus.js) lofts
+// its body with the same machinery; the pieces every vehicle uses are in vehicles.js.
 
 // Car bodies are lofted from ~45 cross-sections generated along the car out of a few smooth side- & plan-view curves
 // (monotone cubic splines) plus elliptical roundings into the nose and tail: rounded plan-view corners, a hood that
@@ -507,15 +508,6 @@ function carLayout(spec) {
   return spec._layout;
 }
 
-// Section winding used by every car loft in this file: left (-x) bottom, up & over the top, right (+x) bottom
-function mirrorSection(right, center, z) {
-  const pts = [];
-  for (const [x, y] of right) pts.push(new THREE.Vector3(-x, y, z));
-  if (center) pts.push(new THREE.Vector3(center[0], center[1], z));
-  for (let i = right.length - 1; i >= 0; i--) pts.push(new THREE.Vector3(right[i][0], right[i][1], z));
-  return pts;
-}
-
 const BODY_LOWER_ROUND = 2.8;
 const BODY_UPPER_ROUND = 3.2;
 
@@ -873,33 +865,6 @@ function buildCarSidePatch(spec, side, z0, z1, y0, y1, offset = 0.003, nz = 10, 
   g.setIndex(indices);
   g.computeVertexNormals();
   return g;
-}
-
-function roundedRectShape(hw, hh, r) {
-  const s = new THREE.Shape();
-  s.moveTo(-hw + r, -hh);
-  s.lineTo(hw - r, -hh);
-  s.quadraticCurveTo(hw, -hh, hw, -hh + r);
-  s.lineTo(hw, hh - r);
-  s.quadraticCurveTo(hw, hh, hw - r, hh);
-  s.lineTo(-hw + r, hh);
-  s.quadraticCurveTo(-hw, hh, -hw, hh - r);
-  s.lineTo(-hw, -hh + r);
-  s.quadraticCurveTo(-hw, -hh, -hw + r, -hh);
-  return s;
-}
-
-// Rounded box extruded along z, centred on the origin
-function roundedBox(hw, hh, depth, r, bevel = 0.012) {
-  const g = new THREE.ExtrudeGeometry(roundedRectShape(hw - bevel, hh - bevel, Math.max(0.002, r - bevel)), {
-    depth: Math.max(0.001, depth - 2 * bevel),
-    bevelEnabled: true,
-    bevelThickness: bevel,
-    bevelSize: bevel,
-    bevelSegments: 1,
-    curveSegments: 2
-  });
-  return g.translate(0, 0, -(depth - 2 * bevel) / 2);
 }
 
 const WHEEL_SEGMENTS = 18;
@@ -1859,7 +1824,5 @@ export {
   carStyleCode,
   buildLightbarGeometry,
   createLightbarMaterial,
-  buildBodyLoft,
-  mirrorSection,
-  roundedBox
+  buildBodyLoft
 };

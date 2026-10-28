@@ -22,8 +22,9 @@ import {
   instanceIndex
 } from 'three/tsl';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { LoftGeometry, part } from './loft-geometry.js';
-import { CAR_PARTS, buildBodyLoft, carBodyHalfWidthAt, mirrorSection, roundedBox } from './cars.js';
+import { LoftGeometry } from 'three/addons/geometries/LoftGeometry.js';
+import { part, mirrorSection, roundedBox } from './vehicles.js';
+import { CAR_PARTS, buildBodyLoft, carBodyHalfWidthAt } from './cars.js';
 
 // A 40-ft low-floor MTA bus lofted with the car body machinery: rounded plan-view corners, a raked windshield, a
 // tight roof radius and arches over the wheels; bumpers, the folded front bike rack, stalk mirrors and the roof AC &
