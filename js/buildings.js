@@ -766,7 +766,7 @@ function buildCityBlocks(scene, landmarkColliders = []) {
       }
 
       // 4. Wrought-iron fire escapes
-      for (const fe of blk.fireEscapes) fireEscapeSystem.add(fe, focusX, focusZ);
+      for (const fe of blk.fireEscapes) fireEscapeSystem.add(fe);
 
       // 5. Retail awnings & illuminated storefront fascia signs
       for (let i = 0; i < blk.awnings.length && awningCount < MAX_AWNINGS; i++) {
