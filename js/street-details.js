@@ -978,7 +978,12 @@ function buildStreetDetails(scene, colliders = []) {
   pitCurbInst.instanceMatrix.needsUpdate = true;
   pitSoilInst.instanceMatrix.needsUpdate = true;
   pitGrateInst.instanceMatrix.needsUpdate = true;
-  for (const pit of [pitCurbInst, pitSoilInst, pitGrateInst]) pit.computeBoundingSphere();
+  // Their footprint would keep these 20 cm boxes drawn at any distance (scene-culling.js): culled with the cross-street
+  // trees over them instead (trees.js MAX_DIST)
+  for (const pit of [pitCurbInst, pitSoilInst, pitGrateInst]) {
+    pit.computeBoundingSphere();
+    pit.userData.cullDistance = 950;
+  }
   group.add(pitCurbInst, pitSoilInst, pitGrateInst);
 
   function hashPos(x, y, z) {

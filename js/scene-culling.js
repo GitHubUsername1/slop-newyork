@@ -163,9 +163,10 @@ function setupSceneCulling(scene, roots, shadow = null) {
     });
   }
   for (const mesh of chunkable) {
-    // unlit (glowing) props, like signal lenses & lamp bulbs, read from much further away at night
+    // unlit (glowing) props, like signal lenses & lamp bulbs, read from much further away at night; a mesh may also
+    // set its own (userData.cullDistance)
     const glow = mesh.material.isMeshBasicNodeMaterial || mesh.material.type === 'MeshBasicNodeMaterial' ? 3 : 1;
-    const cullDist = Math.max(CULL_MIN, instanceSize(mesh) * CULL_PER_METRE * glow);
+    const cullDist = mesh.userData.cullDistance ?? Math.max(CULL_MIN, instanceSize(mesh) * CULL_PER_METRE * glow);
     if (cullDist > CULL_MAX) {
       largeMeshes.push(mesh);
       continue;
