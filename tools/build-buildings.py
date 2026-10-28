@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate js/building-geodata.js from NYC building footprints (requires Shapely 2.1+).
+"""Generate js/building-geodata.js and its gzip asset (requires Shapely 2.1+).
 
 python3 -m pip install 'shapely>=2.1'
 python3 tools/build-buildings.py /tmp/nyc-buildings.json --fetch
@@ -10,24 +10,23 @@ snapshot with a JSON array containing bin and construction_year columns from the
 """
 
 import argparse
-import base64
 import gzip
 import hashlib
 import json
 import math
 from pathlib import Path
+import struct
 import subprocess
 import tempfile
 import urllib.parse
 import urllib.request
 
-from shapely import transform
-from shapely.geometry import Polygon, shape
+from shapely import make_valid, set_precision, transform
+from shapely.geometry import MultiPolygon, Polygon, shape
 from shapely.geometry.polygon import orient
 
 ROOT = Path(__file__).resolve().parent.parent
 SOURCE = 'https://data.cityofnewyork.us/resource/5zhs-2jue.json'
-COUNT = 1000
 PRECISION = 0.5
 LIMIT = 50000
 
@@ -56,21 +55,49 @@ process.stdout.write(JSON.stringify({ lon, lat, origin: toWorld(lon, lat),
     return project, Polygon(zip(island[::2], island[1::2]))
 
 
-def canonical_ring(ring):
+def canonical_ring(ring, precision=PRECISION):
     points = []
     for x, z in list(ring.coords)[:-1]:
-        point = (round(x / PRECISION), round(z / PRECISION))
+        point = (round(x / precision), round(z / precision))
         if not points or points[-1] != point:
             points.append(point)
-    if points[-1] == points[0]:
+    if len(points) > 1 and points[-1] == points[0]:
         points.pop()
     if len(points) < 3:
-        raise ValueError('A building ring collapsed during quantization.')
+        return []
     start = min(range(len(points)), key=points.__getitem__)
     return points[start:] + points[:start]
 
 
-def prepare(rows, supplemental_years):
+def polygon_parts(geometry):
+    if geometry.geom_type == 'Polygon':
+        return [geometry] if not geometry.is_empty else []
+    return [part for child in geometry.geoms for part in polygon_parts(child)] if hasattr(geometry, 'geoms') else []
+
+
+def quantize(geometry):
+    parts = []
+    for part in polygon_parts(geometry):
+        part = orient(part, sign=1)
+        outer = canonical_ring(part.exterior)
+        if not outer:
+            continue
+        holes = [canonical_ring(hole) for hole in part.interiors]
+        parts.append(Polygon(outer, [hole for hole in holes if hole and Polygon(hole).area > 0]))
+    geometry = MultiPolygon(parts)
+    if not geometry.is_valid:
+        # Repair only footprints whose topology changed on the 0.5 m grid.
+        geometry = set_precision(make_valid(geometry, method='structure', keep_collapsed=False), 1)
+    polygons = []
+    for part in polygon_parts(geometry):
+        part = orient(part, sign=1)
+        polygons.append([canonical_ring(part.exterior, 1)] + sorted(canonical_ring(hole, 1) for hole in part.interiors))
+    if not polygons or not geometry.is_valid:
+        raise ValueError('Quantization produced an empty or invalid building footprint.')
+    return sorted(polygons)
+
+
+def prepare(rows, supplemental_years, count=None):
     project, island = load_frame()
     candidates = []
     for row in rows:
@@ -89,77 +116,90 @@ def prepare(rows, supplemental_years):
         year = round(year / 10) * 10 if 1600 <= year <= 2100 else 0
         candidates.append((height, row.get('bin', ''), geometry, year))
     candidates.sort(key=lambda item: (-item[0], item[1], item[2].wkb))
-    if len(candidates) < COUNT:
-        raise ValueError(f'Only {len(candidates)} eligible buildings; expected at least {COUNT}.')
+    if count is not None and len(candidates) < count:
+        raise ValueError(f'Only {len(candidates)} eligible buildings; expected at least {count}.')
 
     buildings = []
-    for height, _, geometry, year in candidates[:COUNT]:
+    for height, _, geometry, year in candidates[:count]:
         geometry = geometry.simplify(PRECISION, preserve_topology=True)
-        parts = list(geometry.geoms) if geometry.geom_type == 'MultiPolygon' else [geometry]
-        polygons = []
-        for part in parts:
-            part = orient(part, sign=1)
-            rings = [canonical_ring(part.exterior)] + sorted(canonical_ring(hole) for hole in part.interiors)
-            if not Polygon(rings[0], rings[1:]).is_valid:
-                raise ValueError('Quantization produced an invalid building footprint.')
-            polygons.append(rings)
-        polygons.sort()
+        polygons = quantize(geometry)
         # Morton order puts nearby buildings together for better delta compression.
         center = geometry.centroid
         x, z = int(center.x + 4096), int(center.y + 16384)
         order = sum(((x >> i) & 1) << (2 * i) | ((z >> i) & 1) << (2 * i + 1) for i in range(16))
-        buildings.append((order, {'height': round(height), 'year': year, 'polygons': polygons}))
+        buildings.append((order, {'height': max(1, round(height)), 'year': year, 'polygons': polygons}))
     return [building for _, building in sorted(buildings, key=lambda item: item[0])]
 
 
 def pack(buildings):
-    data = bytearray()
+    metadata, xs, zs = bytearray(), bytearray(), bytearray()
 
-    def uint(value):
+    def uint(data, value):
         while value > 127:
             data.append((value & 127) | 128)
             value >>= 7
         data.append(value)
 
-    def sint(value):
-        uint(value * 2 if value >= 0 else -value * 2 - 1)
+    def sint(data, value):
+        uint(data, value * 2 if value >= 0 else -value * 2 - 1)
 
-    uint(len(buildings))
+    uint(metadata, len(buildings))
     x = z = 0
     for building in buildings:
-        uint(building['height'])
-        uint(building['year'] // 10 - 159 if building['year'] else 0)
-        uint(len(building['polygons']))
+        uint(metadata, building['height'])
+        uint(metadata, building['year'] // 10 - 159 if building['year'] else 0)
+        uint(metadata, len(building['polygons']))
         for polygon in building['polygons']:
-            uint(len(polygon))
+            uint(metadata, len(polygon))
             for ring in polygon:
-                uint(len(ring))
+                uint(metadata, len(ring))
                 for px, pz in ring:
-                    sint(px - x)
-                    sint(pz - z)
+                    sint(xs, px - x)
+                    sint(zs, pz - z)
                     x, z = px, pz
-    return data
+    # NYB1, two little-endian stream lengths, then metadata and X/Z delta varints.
+    return struct.pack('<4sII', b'NYB1', len(metadata), len(xs)) + metadata + xs + zs
 
 
-def module(data, digest):
+def module(count, asset, digest):
     return f'''// Generated by tools/build-buildings.py; do not edit.
 // NYC OTI Building Footprints: {SOURCE}
 // Snapshot SHA-256: {digest}
-// Tallest {COUNT} buildings in the detailed map. Coordinates: 0.5 m; roof heights: 1 m; construction years: decades (0 unknown).
-const data = atob('{base64.b64encode(data).decode()}');
-let cursor = 0, x = 0, z = 0;
-function uint() {{
-  let value = 0, shift = 0, byte;
-  do {{
-    byte = data.charCodeAt(cursor++);
-    value |= (byte & 127) << shift;
-    shift += 7;
-  }} while (byte & 128);
-  return value;
-}}
-const delta = () => {{ const value = uint(); return (value >>> 1) ^ -(value & 1); }};
+// {count:,} buildings. Coordinates: 0.5 m; roof heights: 1 m; construction years: decades (0 unknown).
+const response = await fetch(new URL('./{asset}', import.meta.url));
+if (!response.ok) throw new Error(`Building data request failed: ${{response.status}}`);
+const data = new Uint8Array(await new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+const invalidData = () => new Error('Invalid building data.');
+if (data.length < 12) throw invalidData();
+const header = new DataView(data.buffer);
+const xStart = 12 + header.getUint32(4, true), zStart = xStart + header.getUint32(8, true);
+if (header.getUint32(0, true) !== 0x3142594e || zStart > data.length) throw invalidData();
 
-export const REAL_BUILDINGS = Array.from({{ length: uint() }}, () => {{
+// NYB1 stores separate metadata, X and Z streams; signed coordinate deltas use zigzag varints.
+function stream(start, end) {{
+  let cursor = start;
+  return {{
+    uint() {{
+      let value = 0, shift = 0, byte;
+      do {{
+        if (cursor >= end || shift >= 28) throw invalidData();
+        byte = data[cursor++];
+        value |= (byte & 127) << shift;
+        shift += 7;
+      }} while (byte & 128);
+      return value;
+    }},
+    done: () => cursor === end
+  }};
+}}
+const metadata = stream(12, xStart), xs = stream(xStart, zStart), zs = stream(zStart, data.length);
+const uint = () => metadata.uint();
+const delta = stream => {{ const value = stream.uint(); return (value >>> 1) ^ -(value & 1); }};
+const count = uint();
+if (count > (xStart - 12) / 5) throw invalidData();
+let x = 0, z = 0;
+
+export const REAL_BUILDINGS = Array.from({{ length: count }}, () => {{
   const height = uint(), decade = uint(), polygons = [];
   let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
   for (let n = uint(); n > 0; n--) {{
@@ -167,7 +207,7 @@ export const REAL_BUILDINGS = Array.from({{ length: uint() }}, () => {{
     for (let n = uint(); n > 0; n--) {{
       const ring = [];
       for (let n = uint(); n > 0; n--) {{
-        x += delta(); z += delta();
+        x += delta(xs); z += delta(zs);
         const point = {{ x: x * 0.5, z: z * 0.5 }};
         minX = Math.min(minX, point.x); maxX = Math.max(maxX, point.x);
         minZ = Math.min(minZ, point.z); maxZ = Math.max(maxZ, point.z);
@@ -180,6 +220,7 @@ export const REAL_BUILDINGS = Array.from({{ length: uint() }}, () => {{
   return {{ height, year: decade ? (decade + 159) * 10 : 0, polygons,
     minX, maxX, minZ, maxZ, cx: (minX + maxX) / 2, cz: (minZ + maxZ) / 2 }};
 }});
+if (!metadata.done() || !xs.done() || !zs.done()) throw invalidData();
 '''
 
 
@@ -188,8 +229,11 @@ def main():
     parser.add_argument('source', nargs='?', type=Path, default=Path(tempfile.gettempdir()) / 'nyc-buildings.json')
     parser.add_argument('--fetch', action='store_true', help='download a fresh Manhattan snapshot to source')
     parser.add_argument('--years', type=Path, help='optional construction-year supplement for older snapshots')
+    parser.add_argument('--count', type=int, help='keep only the tallest N buildings (default: all eligible buildings)')
     parser.add_argument('--output', type=Path, default=ROOT / 'js/building-geodata.js')
     args = parser.parse_args()
+    if args.count is not None and args.count < 1:
+        parser.error('--count must be positive')
     if args.fetch:
         query = urllib.parse.urlencode({
             '$select': 'the_geom,height_roof,bin,feature_code,construction_year',
@@ -214,8 +258,11 @@ def main():
             year, key = int(row.get('construction_year') or 0), row['bin']
             if key != '1000000' and 1600 <= year <= 2100:
                 years[key] = min(year, years.get(key, year))
-    buildings = prepare(rows, years)
-    output = module(pack(buildings), hashlib.sha256(source).hexdigest())
+    buildings = prepare(rows, years, args.count)
+    asset = args.output.with_suffix('.bin.gz')
+    compressed = gzip.compress(pack(buildings), compresslevel=6, mtime=0)
+    asset.write_bytes(compressed)
+    output = module(len(buildings), asset.name, hashlib.sha256(source).hexdigest())
     args.output.write_text(output)
     polygons = [polygon for building in buildings for polygon in building['polygons']]
     holes = sum(len(polygon) - 1 for polygon in polygons)
@@ -223,7 +270,7 @@ def main():
     print(f'[buildings] {len(buildings)} buildings, {len(polygons)} polygons, {holes} holes, {vertices} vertices')
     print(f'[buildings] {min(b["height"] for b in buildings)}–{max(b["height"] for b in buildings)} m; '
           f'{sum(b["year"] > 0 for b in buildings)} construction decades')
-    print(f'[buildings] {len(output.encode())} bytes; {len(gzip.compress(output.encode(), compresslevel=6, mtime=0))} bytes gzip')
+    print(f'[buildings] {len(compressed)} bytes gzip data; {len(output.encode())} bytes JavaScript')
 
 
 if __name__ == '__main__':

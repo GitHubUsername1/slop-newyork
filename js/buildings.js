@@ -1902,7 +1902,7 @@ function buildCityBlocks(scene, landmarkColliders = []) {
     if (!t) return null;
     return { x: t.x, z: t.z, x0: t.x - t.w / 2 - 3, x1: t.x + t.w / 2 + 3, z0: t.z - t.d / 2 - 3, z1: t.z + t.d / 2 + 3, ...(o || {}) };
   }).filter(Boolean);
-  // Keep the authored landmark models; the survey supplies the other tall buildings around them.
+  // Keep the authored landmark models; the survey supplies the surrounding buildings.
   const surveyedBuildings = REAL_BUILDINGS.filter((b) => !LANDMARK_RESERVE.some((h) =>
     b.polygons.some((p) => polygonContains({ outer: p.outer, holes: [] }, h.x, h.z)))
     && !landmarkColliders.some((c) => b.minX < c.maxX && b.maxX > c.minX && b.minZ < c.maxZ && b.maxZ > c.minZ
@@ -1914,6 +1914,28 @@ function buildCityBlocks(scene, landmarkColliders = []) {
     x0: b.minX - 0.8, x1: b.maxX + 0.8, z0: b.minZ - 0.8, z1: b.maxZ + 0.8, polygons: b.polygons
   }));
   const hitR = (a, x0, x1, z0, z1) => a.x0 < x1 && a.x1 > x0 && a.z0 < z1 && a.z1 > z0;
+  const reserveCells = new Map();
+  surveyedReserves.forEach((r, index) => {
+    for (let ix = Math.floor(r.x0 / 128); ix <= Math.floor(r.x1 / 128); ix++) {
+      for (let iz = Math.floor(r.z0 / 128); iz <= Math.floor(r.z1 / 128); iz++) {
+        const key = ix + ',' + iz;
+        if (!reserveCells.has(key)) reserveCells.set(key, []);
+        reserveCells.get(key).push(index);
+      }
+    }
+  });
+  function reservesForBlock(b) {
+    const found = new Set();
+    for (let ix = Math.floor(b.minX / 128); ix <= Math.floor(b.maxX / 128); ix++) {
+      for (let iz = Math.floor(b.minZ / 128); iz <= Math.floor(b.maxZ / 128); iz++) {
+        for (const index of reserveCells.get(ix + ',' + iz) || []) {
+          if (hitR(surveyedReserves[index], b.minX, b.maxX, b.minZ, b.maxZ)) found.add(index);
+        }
+      }
+    }
+    // Preserve the subtraction order so the remaining procedural lots stay deterministic.
+    return [...found].sort((a, b) => a - b).map((index) => surveyedReserves[index]);
+  }
   // [x0, x1, z0, z1] minus the reserved rects, as up to four slabs per hole (strips across the full depth first). In a
   // frontage frame the reserves are their bounds in the frame
   function reserveInFrame(h) {
@@ -1973,7 +1995,7 @@ function buildCityBlocks(scene, landmarkColliders = []) {
   for (const b of BLOCKS) {
     if (b.park > 0.6 || b.median) continue;
     minLot = b.frames ? 12 : 15;
-    const reserves = [...landmarkReserves, ...surveyedReserves.filter((r) => hitR(r, b.minX, b.maxX, b.minZ, b.maxZ))];
+    const reserves = [...landmarkReserves, ...reservesForBlock(b)];
     for (const [th, px, pz, rects] of b.frames || [[0, 0, 0, b.rects]]) {
       xf = th ? { th, cs: Math.cos(th), sn: Math.sin(th), px, pz } : null;
       const frameReserves = reserves.map(reserveInFrame);
@@ -2052,6 +2074,37 @@ function buildCityBlocks(scene, landmarkColliders = []) {
   if (TS) {
     const DIRS = [[-1, 0], [1, 0], [0, -1], [0, 1]]; // createFacadeBoxes `faces` order: w, e, n, s
     const hash = (a, b) => Math.abs(Math.sin(a * 12.9898 + b * 78.233) * 43758.5453) % 1;
+    function addBillboards(cx, cz, nx, nz, length, base, top) {
+      if (length < 8 || top - base < 8) return;
+      const ax = -nz, az = nx;
+      const seen = [0.2, 0.5, 0.8].some((t) => [6, 12, 20, 30].some((d) => {
+        const u = (t - 0.5) * length;
+        return inBowtie(cx + nx * d + ax * u, cz + nz * d + az * u);
+      }));
+      if (!seen) return;
+      const n = Math.max(1, Math.ceil((length - 2) / 26));
+      const pw = (length - 2 - (n - 1) * 1.2) / n;
+      for (let i = 0; i < n; i++) {
+        const u = -length * 0.5 + 1 + i * (pw + 1.2) + pw * 0.5;
+        let y = base;
+        for (let tier = 0; y < top - 6; tier++) {
+          const h = Math.min(top - y, 8 + 8 * hash(u + tier, cx));
+          if (h < 6) break;
+          if (hash(cz + tier, u) > 0.12) {
+            broadwayBillboards.push({
+              x: cx + nx * 0.35 + ax * u,
+              y: y + h * 0.5,
+              z: cz + nz * 0.35 + az * u,
+              w: pw,
+              h,
+              rotY: Math.atan2(nx, nz),
+              variant: Math.floor(hash(cx + i, cz + tier) * 6)
+            });
+          }
+          y += h + 1.2;
+        }
+      }
+    }
     for (const items of buckets) {
       for (const bx of items) {
         if (bx.z + bx.d * 0.5 < TS.zN - 40 || bx.z - bx.d * 0.5 > TS.zS + 40 || Math.abs(bx.x - TS.x7) > 280) continue;
@@ -2069,38 +2122,20 @@ function buildCityBlocks(scene, landmarkColliders = []) {
           const cz = bx.z - ox * s + oz * c;
           const nx = lx * c + lz * s;
           const nz = -lx * s + lz * c;
-          const ax = -lz * c + lx * s;
-          const az = lz * s + lx * c;
-          const L = lx ? bx.d : bx.w;
-          if (L < 8) return;
-          const seen = [0.2, 0.5, 0.8].some((t) => [6, 12, 20, 30].some((d) => {
-            const u = (t - 0.5) * L;
-            return inBowtie(cx + nx * d + ax * u, cz + nz * d + az * u);
-          }));
-          if (!seen) return;
-          const n = Math.max(1, Math.ceil((L - 2) / 26));
-          const pw = (L - 2 - (n - 1) * 1.2) / n;
-          for (let i = 0; i < n; i++) {
-            const u = -L * 0.5 + 1 + i * (pw + 1.2) + pw * 0.5;
-            let y = base;
-            for (let tier = 0; y < top - 6; tier++) {
-              const h = Math.min(top - y, 8 + 8 * hash(u + tier, cx));
-              if (h < 6) break;
-              if (hash(cz + tier, u) > 0.12) {
-                broadwayBillboards.push({
-                  x: cx + nx * 0.35 + ax * u,
-                  y: y + h * 0.5,
-                  z: cz + nz * 0.35 + az * u,
-                  w: pw,
-                  h,
-                  rotY: Math.atan2(nx, nz),
-                  variant: Math.floor(hash(cx + i, cz + tier) * 6)
-                });
-              }
-              y += h + 1.2;
-            }
-          }
+          addBillboards(cx, cz, nx, nz, lx ? bx.d : bx.w, base, top);
         });
+      }
+    }
+    for (const b of surveyedBuildings) {
+      if (b.maxZ < TS.zN - 40 || b.minZ > TS.zS + 40 || Math.abs(b.cx - TS.x7) > 280) continue;
+      for (const { outer } of b.polygons) {
+        for (let i = 0; i < outer.length; i++) {
+          const a = outer[i], c = outer[(i + 1) % outer.length];
+          const dx = c.x - a.x, dz = c.z - a.z, length = Math.hypot(dx, dz);
+          if (length < 8) continue;
+          addBillboards((a.x + c.x) / 2, (a.z + c.z) / 2, dz / length, -dx / length,
+            length, 7.5, Math.min(b.height + 0.22 - 2, 62));
+        }
       }
     }
   }
