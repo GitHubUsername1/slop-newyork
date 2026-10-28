@@ -168,7 +168,11 @@ def module(count, asset, digest):
 // {count:,} buildings. Coordinates: 0.5 m; roof heights: 1 m; construction years: decades (0 unknown).
 const response = await fetch(new URL('./{asset}', import.meta.url));
 if (!response.ok) throw new Error(`Building data request failed: ${{response.status}}`);
-const data = new Uint8Array(await new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+// Servers that send .gz files as Content-Encoding: gzip hand over bytes the browser has already inflated
+const body = new Uint8Array(await response.arrayBuffer());
+const data = body[0] === 0x1f && body[1] === 0x8b
+  ? new Uint8Array(await new Response(new Response(body).body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer())
+  : body;
 const invalidData = () => new Error('Invalid building data.');
 if (data.length < 12) throw invalidData();
 const header = new DataView(data.buffer);

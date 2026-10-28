@@ -4,7 +4,11 @@
 // 70,680 unique living tree locations, quantized to 0.5 m.
 const response = await fetch(new URL('./tree-geodata.bin.gz', import.meta.url));
 if (!response.ok) throw new Error(`Tree data request failed: ${response.status}`);
-const data = new Uint8Array(await new Response(response.body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+// Servers that send .gz files as Content-Encoding: gzip hand over bytes the browser has already inflated
+const body = new Uint8Array(await response.arrayBuffer());
+const data = body[0] === 0x1f && body[1] === 0x8b
+  ? new Uint8Array(await new Response(new Response(body).body.pipeThrough(new DecompressionStream('gzip'))).arrayBuffer())
+  : body;
 const invalidData = () => new Error('Invalid tree data.');
 if (data.length < 12) throw invalidData();
 const header = new DataView(data.buffer);
