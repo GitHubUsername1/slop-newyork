@@ -103,7 +103,7 @@ function addBuildingDetails(b, detail, { masonry, rand, neighbours }) {
         item = { x: x + e.nx * 2, y: 0.22, z: z + e.nz * 2, w: 3.8, d, ry };
         detail.scaffoldSheds.push(item);
       } else {
-        item = { x: x + e.nx, y: 3.8, z: z + e.nz, w: 1.8, d, sideDir: 1, colorIdx: Math.floor(rand() * 5), ry };
+        item = { x: x + e.nx, y: 3.8, z: z + e.nz, w: 1.8, d, colorIdx: Math.floor(rand() * 5), ry };
         detail.awnings.push(item);
       }
       const outer = boxCorners(item.x, item.z, item.w, item.d, cs, sn);

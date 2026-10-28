@@ -346,7 +346,7 @@ function buildCityBlocks(scene, landmarkColliders = []) {
     const mat = b.year && b.year < 1945 ? (tone < 0.8 ? 0 : 1)
       : b.year && b.year < 1980 ? (tone < 0.55 ? 0 : 3)
         : tone < 0.6 ? 2 : 4;
-    surveyedBuckets[mat].push({ ...b, tone, seed: surveyedBuckets[mat].length * 29 });
+    surveyedBuckets[mat].push({ ...b, tone });
     const detail = {
       cx: b.cx, cz: b.cz, minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ,
       cornices: [], waterTowers: [], hvacUnits: [], fireEscapes: [], awnings: [], scaffoldSheds: [], footprints: []
@@ -878,9 +878,8 @@ function buildCityBlocks(scene, landmarkColliders = []) {
         const cand = spotCandidates[i];
         const { a, themeIdx, ry } = cand.item;
         const fade = smoothFade(cand.effDist, storeCutoff * 0.62, storeCutoff);
-        const sideDir = a.sideDir || 1;
-        const outX = Math.cos(ry) * sideDir;
-        const outZ = -Math.sin(ry) * sideDir;
+        const outX = Math.cos(ry);
+        const outZ = -Math.sin(ry);
         spot.position.set(a.x + outX * 0.45, 4.35, a.z + outZ * 0.45);
         spot.target.position.set(a.x + outX * 1.85, 0.0, a.z + outZ * 1.85);
         spot.target.updateMatrixWorld();
