@@ -1600,12 +1600,104 @@ function roadWetMasks(field, drainage = 0.0) {
   return vec3(damp, puddle, film);
 }
 
+// Distance from p to the nearest border of its jittered 3x3 Voronoi cell (in cell units, ~(F2 - F1) / 2)
+const voronoiBorder = Fn(([p]) => {
+  const pv = vec2(p).toVar();
+  const ip = floor(pv).toVar();
+  const fp = fract(pv).toVar();
+  const f1 = float(8.0).toVar();
+  const f2 = float(8.0).toVar();
+  for (let j = -1; j <= 1; j++) {
+    for (let i = -1; i <= 1; i++) {
+      const id = ip.add(vec2(i, j));
+      const site = vec2(i, j).add(vec2(hash2D(id), hash2D(id.add(vec2(37.1, 11.7)))).mul(0.8).add(0.1));
+      const d = length(fp.sub(site)).toVar();
+      f2.assign(min(f2, max(f1, d)));
+      f1.assign(min(f1, d));
+    }
+  }
+  return f2.sub(f1).mul(0.5);
+});
+
 /**
- * Unified Manhattan Roadway Asphalt, Footprint-Filtered Aggregate `bumpNormal`, Scattered Manholes
- * & Post-Rain Wetness (upgraded with techniques from CityGenerator.js `createRoadMaterial`).
- * cityUniforms.uRoadWetness drives damp stains, a glossy wet film & standing puddles (roadWetMasks): bone dry at
- * midday, a few small pools at golden hour, slick & mirroring the lights at night. Water's Fresnel rides on metalness
- * (as for the rivers), so puddles reflect the street through SSR at grazing angles yet only darken seen from above.
+ * Wear & repairs of the asphalt at world xz, `px` metres a pixel: x = hairline crack coverage (block & alligator
+ * cracking in worn stretches), y = signed distance to the edge of a rectangular utility-cut patch (m, < 0 inside),
+ * z = pothole depth (0 .. 1 at the bottom of the bowl), w = 1 where the 11 m cell has a patch.
+ * Cracks are only traced near the camera and in the worn stretches, where they can show.
+ */
+const roadWear = Fn(([wxz, px]) => {
+  // Worn stretches: about a quarter of the roadway, in patches a block or so across
+  const worn = smoothstep(0.5, 0.78, noise2D(wxz.mul(0.045).add(71.0))).toVar();
+
+  const crack = float(0.0).toVar();
+  If(worn.greaterThan(0.001).and(px.lessThan(0.04)), () => {
+    const warp = vec2(noise2D(wxz.mul(2.7)), noise2D(wxz.mul(2.7).add(13.0))).sub(0.5).mul(0.35);
+    const cell = 0.55;
+    const border = voronoiBorder(wxz.div(cell).add(warp)).mul(cell);
+    const width = worn.mul(0.0016).add(0.0012);
+    const effWidth = max(width, px.mul(0.6));
+    crack.assign(float(1.0).sub(smoothstep(effWidth, effWidth.add(px), border)).mul(width.div(effWidth)).mul(worn)
+      .mul(smoothstep(0.04, 0.015, px)));
+  });
+
+  // Rectangular utility-cut patches (ConEd, water & sewer trenches): one 11 m cell in two, kept inside its cell. Some
+  // are squarish cuts, others long narrow trenches running along the avenue or across it
+  const pCell = floor(wxz.div(11.0));
+  const hasPatch = step(0.5, hash2D(pCell.add(vec2(3.7, 8.1))));
+  const trench = step(0.6, hash2D(pCell.add(vec2(2.9, 6.3))));
+  const alongX = step(0.5, hash2D(pCell.add(vec2(5.5, 9.9))));
+  const pCentre = pCell.add(0.5).add(vec2(hash2D(pCell.add(vec2(1.3, 5.9))), hash2D(pCell.add(vec2(9.2, 2.4)))).sub(0.5)
+    .mul(mix(float(0.4), float(0.08), trench))).mul(11.0);
+  const cutHalf = vec2(hash2D(pCell.add(vec2(4.4, 0.6))).mul(1.8).add(0.6), hash2D(pCell.add(vec2(7.8, 3.1))).mul(1.4).add(0.5));
+  const trenchLong = hash2D(pCell.add(vec2(0.7, 4.8))).mul(2.0).add(2.4);
+  const trenchNarrow = hash2D(pCell.add(vec2(6.6, 7.2))).mul(0.25).add(0.3);
+  const trenchHalf = mix(vec2(trenchNarrow, trenchLong), vec2(trenchLong, trenchNarrow), alongX);
+  const pHalf = mix(cutHalf, trenchHalf, trench);
+  const pq = abs(wxz.sub(pCentre)).sub(pHalf);
+  const patchDist = max(pq.x, pq.y);
+
+  // Potholes, mostly in the worn stretches: a ragged bowl a hand or two across
+  const hCell = floor(wxz.div(7.0));
+  const hCentre = hCell.add(vec2(hash2D(hCell.add(vec2(2.2, 7.7))), hash2D(hCell.add(vec2(6.1, 1.9)))).mul(0.6).add(0.2)).mul(7.0);
+  const hRadius = hash2D(hCell.add(vec2(5.3, 4.2))).mul(0.24).add(0.12);
+  const hDist = length(wxz.sub(hCentre)).mul(noise2D(wxz.mul(6.0)).sub(0.5).mul(0.5).add(1.0));
+  const hasHole = step(float(0.975).sub(worn.mul(0.12)), hash2D(hCell.add(vec2(8.8, 0.3))));
+  const pothole = smoothstep(hRadius.add(px), hRadius.mul(0.35), hDist).mul(hasHole);
+
+  return vec4(crack.mul(float(1.0).sub(step(patchDist, 0.0).mul(hasPatch))), patchDist, pothole, hasPatch);
+});
+
+/**
+ * "Tar snakes" at world xz, `px` metres a pixel: the meandering 3-5 cm bands of black crack sealant the city pours over
+ * the wider cracks, in a broken network of ~2.4 m cells across sealed stretches of the roadway. Wide enough to read
+ * from the car, so they are traced further than the hairline cracks, thinning out before they shrink below a pixel.
+ */
+const roadTarSnakes = Fn(([wxz, px]) => {
+  const zone = smoothstep(0.3, 0.48, noise2D(wxz.mul(0.03).add(17.0))).toVar();
+  const snake = float(0.0).toVar();
+  If(zone.greaterThan(0.001).and(px.lessThan(0.12)), () => {
+    const warp = vec2(noise2D(wxz.mul(0.9)), noise2D(wxz.mul(0.9).add(31.0))).sub(0.5).mul(0.6);
+    const cell = 2.4;
+    const border = voronoiBorder(wxz.div(cell).add(warp)).mul(cell);
+    // Only some cracks were sealed: the network breaks up into runs a few metres long
+    const keep = smoothstep(0.38, 0.5, noise2D(wxz.mul(0.6).add(5.0)));
+    const width = noise2D(wxz.mul(1.7).add(9.0)).mul(0.012).add(0.014);
+    const effWidth = max(width, px.mul(0.6));
+    snake.assign(float(1.0).sub(smoothstep(effWidth, effWidth.add(px), border)).mul(width.div(effWidth)).mul(zone).mul(keep)
+      .mul(smoothstep(0.12, 0.06, px)));
+  });
+  return snake;
+});
+
+/**
+ * Unified Manhattan Roadway Asphalt, Footprint-Filtered Aggregate `bumpNormal`, Scattered Manholes, Wear & Repairs
+ * (block cracking, tar-sealed utility-cut patches & trenches, potholes, tar snakes, oil drips, exposed stone chips, a
+ * gentle swell of the paving; see roadWear & roadTarSnakes) & Post-Rain Wetness (upgraded with techniques from
+ * CityGenerator.js `createRoadMaterial`).
+ * cityUniforms.uRoadWetness drives damp stains, a faint wet sheen & standing puddles (roadWetMasks): bone dry at
+ * midday, a few small pools at golden hour, glossy stains & pools mirroring the lights at night. Water's Fresnel rides
+ * on metalness (as for the rivers), so puddles reflect the street through SSR at grazing angles yet only darken seen
+ * from above.
  * Lane markings are separate geometry built from the road network (js/road-paint.js).
  */
 function createRoadSurfaceMaterial() {
@@ -1614,18 +1706,50 @@ function createRoadSurfaceMaterial() {
     roughness: 0.48
   });
 
-  const cAsphaltDark = color(0x2b2e33);
-  const cAsphaltLight = color(0x464a51);
+  // Weathered, oxidised asphalt (fresh blacktop only in the newer patches)
+  const cAsphaltDark = color(0x3d3f43);
+  const cAsphaltLight = color(0x686a6e);
   const cManhole = color(0x4a433c);
+  const cOldPatch = color(0x77787a);
 
-  // Puddle field & wetness masks shared by every channel below (each node is generated once per fragment)
-  const puddleField = roadPuddleField(positionWorld.x, positionWorld.z);
+  // World size of a pixel: fine texture settles to its mean before it can alias at grazing angles or from the air
+  const pixelSize = length(fwidth(positionWorld.xz));
+  // Cracks, utility-cut patches & potholes, shared by every channel below (see roadWear)
+  const wear = roadWear(positionWorld.xz, pixelSize);
+  const crack = wear.x;
+  const patchDist = wear.y;
+  const pothole = wear.z;
+  const patchCover = smoothstep(pixelSize, pixelSize.negate(), patchDist).mul(wear.w);
+  // The tar sealing the saw-cut edge of each patch, a few centimetres wide
+  const sealWidth = max(float(0.022), pixelSize.mul(0.75));
+  const patchSeal = float(1.0).sub(smoothstep(sealWidth, sealWidth.add(pixelSize), abs(patchDist))).mul(float(0.022).div(sealWidth)).mul(wear.w);
+  // Fresh patches are darker & tighter than the roadway, old ones paler & greyer
+  const patchFresh = step(0.55, hash2D(floor(positionWorld.xz.div(11.0)).add(vec2(12.9, 6.6))));
+  // Exposed light stone chips in the worn surface, settling to their average where they shrink below a pixel
+  const chips = mix(float(0.035), smoothstep(0.72, 0.8, noise2D(positionWorld.xz.mul(30.0))), smoothstep(0.03, 0.012, pixelSize));
+  // Tar-snake crack sealant (none over the newer patches)
+  const tarSnake = roadTarSnakes(positionWorld.xz, pixelSize).mul(float(1.0).sub(patchCover));
+  // Oil & coolant drips from parked & idling cars: ragged dark blots a hand or two across, one 2.5 m cell in three
+  const oilCell = floor(positionWorld.xz.div(2.5));
+  const oilCentre = oilCell.add(vec2(hash2D(oilCell.add(vec2(4.1, 2.2))), hash2D(oilCell.add(vec2(8.3, 6.7)))).mul(0.6).add(0.2)).mul(2.5);
+  const oilDist = length(positionWorld.xz.sub(oilCentre)).mul(noise2D(positionWorld.xz.mul(5.0)).sub(0.5).mul(0.8).add(1.0));
+  const oilRadius = hash2D(oilCell.add(vec2(1.9, 9.4))).mul(0.25).add(0.1);
+  const oilDrip = smoothstep(oilRadius.add(pixelSize), oilRadius.mul(0.3), oilDist).mul(step(0.66, hash2D(oilCell.add(vec2(7.7, 3.3)))))
+    .mul(hash2D(oilCell.add(vec2(2.6, 5.1))).mul(0.6).add(0.4));
+
+  // Circular cast-iron ConEd / NYC Sewer manhole covers scattered over the roadway (one 14 m cell in three)
+  const mhCell = floor(positionWorld.xz.div(14.0));
+  const mhCentre = mhCell.add(vec2(hash2D(mhCell.add(13.7)), hash2D(mhCell.add(29.1))).mul(0.6).add(0.2)).mul(14.0);
+  const mhDist = length(positionWorld.xz.sub(mhCentre));
+  const hasManhole = step(0.66, hash2D(mhCell));
+
+  // Puddle field & wetness masks shared by every channel below (each node is generated once per fragment); potholes
+  // hold water first
+  const puddleField = roadPuddleField(positionWorld.x, positionWorld.z).add(pothole.mul(0.45));
   const wet = roadWetMasks(puddleField);
   const damp = wet.x;
   const puddle = wet.y;
   const film = wet.z;
-  // World size of a pixel: fine texture settles to its mean before it can alias at grazing angles or from the air
-  const pixelSize = length(fwidth(positionWorld.xz));
   const viewDir = normalize(cameraPosition.sub(positionWorld));
   const waterFresnel = pow(float(1.0).sub(clamp(viewDir.y, 0.0, 1.0)), 5.0).mul(0.98).add(0.02);
 
@@ -1643,47 +1767,87 @@ function createRoadSurfaceMaterial() {
     const patchNoise = noise2D(vec2(wx.mul(0.18), wz.mul(0.18)));
     const oilyStain = smoothstep(0.52, 0.84, noise2D(vec2(wx.mul(0.42), wz.mul(0.42)))).mul(detail);
     const tarSeam = float(1.0).sub(smoothstep(0.0, 0.04, abs(patchNoise.sub(0.52)))).mul(0.42).mul(detail);
+    // Binder-rich (dark) & ravelled, aggregate-exposed (pale) mottling a stride or so across
+    const mottle = noise2D(vec2(wx.mul(0.9), wz.mul(0.9)).add(41.0)).mul(0.65).add(noise2D(vec2(wx.mul(2.3), wz.mul(2.3)).add(7.0)).mul(0.35));
 
     const baseAsphalt = mix(
       cAsphaltDark,
       cAsphaltLight,
-      fineGrain.mul(0.36).add(microAggregate.mul(0.22)).add(patchNoise.mul(0.26))
+      fineGrain.mul(0.3).add(microAggregate.mul(0.22)).add(patchNoise.mul(0.22)).add(smoothstep(0.3, 0.7, mottle).mul(0.26)).sub(0.04)
     )
       .mul(float(1.0).sub(oilyStain.mul(0.32)))
       .mul(float(1.0).sub(tarSeam));
 
-    // Circular cast-iron ConEd / NYC Sewer manhole covers scattered over the roadway (one 14 m cell in three)
-    const mhCell = floor(vec2(wx, wz).div(14.0));
-    const mhCentre = mhCell.add(vec2(hash2D(mhCell.add(13.7)), hash2D(mhCell.add(29.1))).mul(0.6).add(0.2)).mul(14.0);
-    const mhDist = length(vec2(wx, wz).sub(mhCentre));
-    const isManhole = float(1.0).sub(smoothstep(0.52, 0.60, mhDist)).mul(step(0.66, hash2D(mhCell))).mul(detail);
+    // Utility-cut patches with their tar-sealed edges, stone chips, tar snakes, oil drips, cracks & potholes
+    const patchCol = mix(mix(baseAsphalt, cOldPatch, 0.45).mul(1.08), color(0x2b2e33).mul(0.85), patchFresh);
+    const repaired = mix(baseAsphalt, patchCol, patchCover)
+      .mul(float(1.0).sub(patchSeal.mul(0.5)))
+      .add(chips.mul(0.08).mul(float(1.0).sub(patchCover.mul(patchFresh))))
+      .mul(float(1.0).sub(tarSnake.mul(0.62)))
+      .mul(float(1.0).sub(oilDrip.mul(0.45)))
+      .mul(float(1.0).sub(crack.mul(0.65)))
+      .mul(float(1.0).sub(pothole.mul(0.4)));
+
+    const isManhole = float(1.0).sub(smoothstep(0.52, 0.60, mhDist)).mul(hasManhole).mul(detail);
     const mhRings = sin(mhDist.mul(36.0)).mul(0.15).add(0.85);
 
     // Water filling the pores darkens the surface: damp stains & pools most, the overall wet film a little
     const wetDarkening = mix(mix(float(1.0), float(0.72), damp), float(0.6), puddle).mul(mix(float(1.0), float(0.8), film));
-    return mix(baseAsphalt, cManhole.mul(mhRings), isManhole).mul(wetDarkening);
+    return mix(repaired, cManhole.mul(mhRings), isManhole).mul(wetDarkening);
   })();
 
   mat.roughnessNode = Fn(() => {
     const microRough = mix(float(0.04), noise2D(positionWorld.xz.mul(12.0)).mul(0.08), smoothstep(0.08, 0.03, pixelSize));
-    const wetRough = mix(float(0.90).add(microRough), float(0.38), max(film.mul(0.9), damp.mul(0.8)));
+    // Tar sealant is glossier, oil satin, fresh patches a little tighter, potholes & cracks rougher
+    const dry = float(0.90).add(microRough)
+      .sub(patchSeal.mul(0.3))
+      .sub(tarSnake.mul(0.38))
+      .sub(oilDrip.mul(0.18))
+      .sub(patchCover.mul(patchFresh).mul(0.06))
+      .add(pothole.mul(0.06));
+    // The wet film only takes the edge off the asphalt's mattness (a soft sheen, too rough for SSR); real gloss is kept
+    // for the damp stains and the standing water
+    const filmed = mix(dry, float(0.68), film.mul(0.7));
+    const wetRough = mix(filmed, float(0.4), damp.mul(0.85));
     return mix(wetRough, float(0.1), puddle);
   })();
 
-  // Water's Fresnel (F0 = 0.02): weights SSR & trades diffuse for reflection in pools (fully) and the wet film (partly)
-  mat.metalnessNode = clamp(waterFresnel.mul(1.6), 0.0, 0.85).mul(max(puddle, film.mul(0.6)));
+  // Water's Fresnel (F0 = 0.02): weights SSR & trades diffuse for reflection in pools (fully), damp stains (partly) and
+  // the wet film (barely)
+  mat.metalnessNode = clamp(waterFresnel.mul(1.6), 0.0, 0.85).mul(max(puddle, max(damp.mul(0.35), film.mul(0.15))));
 
-  // Footprint-gated 3mm + 1.6mm asphalt aggregate relief via bumpNormal (from CityGenerator.js)
-  // Flattens to mirror-smooth 0.0 inside standing rainwater puddles so SSR reflections stay crisp!
+  // Footprint-gated asphalt relief via bumpNormal (from CityGenerator.js): a gentle swell & sag of the paving, shallow
+  // ruts & ripples, 6 mm ravelled coarse texture + 2.2 mm & 1.6 mm aggregate grit, stone chips, hairline cracks, raised
+  // patches with their tar seals, tar-snake beads, pothole bowls and the manhole covers' rims & rings. Steps ramp over
+  // >= 2 px so no edge sparkles; the finest relief fades before it shrinks to a pixel. Flattens to mirror-smooth 0.0
+  // inside standing rainwater puddles so SSR reflections stay crisp!
   mat.normalNode = Fn(() => {
     const wx = positionWorld.x;
     const wz = positionWorld.z;
-    const coarseFade = smoothstep(0.08, 0.025, pixelSize);
+    const coarseFade = smoothstep(0.12, 0.035, pixelSize);
+    const midFade = smoothstep(0.035, 0.012, pixelSize);
     const fineFade = smoothstep(0.02, 0.006, pixelSize).mul(float(1.0).sub(film.mul(0.6)));
+    const ramp = max(float(0.012), pixelSize.mul(2.0));
 
-    const coarseGrit = noise2D(vec2(wx.mul(8.5), wz.mul(8.5))).sub(0.5).mul(0.0032).mul(coarseFade);
+    const swell = noise2D(vec2(wx.mul(0.55), wz.mul(0.55)).add(23.0)).sub(0.5).mul(0.02)
+      .add(noise2D(vec2(wx.mul(1.9), wz.mul(1.9))).sub(0.5).mul(0.005));
+    const ripples = noise2D(vec2(wx.mul(3.6), wz.mul(3.6)).add(61.0)).sub(0.5).mul(0.004).mul(smoothstep(0.3, 0.1, pixelSize));
+    const coarseGrit = noise2D(vec2(wx.mul(8.5), wz.mul(8.5))).sub(0.5).mul(0.006).mul(coarseFade);
+    const midGrit = noise2D(vec2(wx.mul(19.0), wz.mul(19.0)).add(3.0)).sub(0.5).mul(0.0022).mul(midFade);
     const fineGrit = noise2D(vec2(wx.mul(36.0), wz.mul(36.0))).sub(0.5).mul(0.0016).mul(fineFade);
-    return bumpNormal(coarseGrit.add(fineGrit).mul(float(1.0).sub(puddle)));
+    const chipRelief = chips.mul(0.0015).mul(midFade);
+    const snakeBead = tarSnake.mul(0.0018);
+    const crackGroove = crack.mul(0.003).mul(smoothstep(0.012, 0.004, pixelSize));
+    const patchStep = smoothstep(ramp, ramp.negate(), patchDist).mul(wear.w).mul(0.004);
+    const sealBead = float(1.0).sub(smoothstep(0.0, max(float(0.03), ramp), abs(patchDist))).mul(wear.w).mul(0.0015);
+    const bowl = pothole.mul(0.03);
+    const mhRim = float(1.0).sub(smoothstep(0.0, max(float(0.02), ramp), abs(mhDist.sub(0.58)))).mul(0.004);
+    const mhPattern = sin(mhDist.mul(36.0)).mul(0.0008).mul(step(mhDist, 0.54)).mul(smoothstep(0.01, 0.004, pixelSize));
+    const manhole = mhPattern.sub(mhRim).mul(hasManhole).mul(coarseFade);
+
+    const height = swell.add(ripples).add(coarseGrit).add(midGrit).add(fineGrit).add(chipRelief).add(snakeBead).sub(crackGroove)
+      .add(patchStep).add(sealBead).sub(bowl).add(manhole);
+    return bumpNormal(height.mul(float(1.0).sub(puddle)));
   })();
 
   mat.emissiveNode = Fn(() => {
