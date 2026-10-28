@@ -214,7 +214,9 @@ function setupSceneCulling(scene, roots, shadow = null) {
       root.traverse((o) => {
         if (!o.castShadow || !isStaticMesh(o) || !proxyableMaterial(o.material)) return;
         if (o.isInstancedMesh && o.count !== o.instanceMatrix.count) return;
-        // Pre-chunked casters (building-footprints.js) are big together, but each chunk falls under the size limits
+        // Opt-ins (userData.shadowStandIn: true, or a coarser BufferGeometry to cast with): pre-chunked casters
+        // (building-footprints.js) are big together, but each chunk falls under the size limits; and thin props
+        // (street-details.js) cast the same shadow with far fewer triangles
         if (o.userData.shadowStandIn) {
           sources.push(o);
           return;
@@ -235,7 +237,7 @@ function setupSceneCulling(scene, roots, shadow = null) {
 
     for (const o of sources) {
       const side = sideOf(o.material);
-      const geo = o.geometry;
+      const geo = o.userData.shadowStandIn?.isBufferGeometry ? o.userData.shadowStandIn : o.geometry;
       if (o.isInstancedMesh) {
         const pos = geo.attributes.position;
         if (!geo.boundingBox) geo.computeBoundingBox();

@@ -499,6 +499,7 @@ function buildStreetDetails(scene, colliders = []) {
     }
     inst.instanceMatrix.needsUpdate = true;
     group.add(inst);
+    return inst;
   }
 
   addMatrixArrayInstanced(unitCyl, poleMetalMat, poleMatrices);
@@ -511,7 +512,14 @@ function buildStreetDetails(scene, colliders = []) {
   addMatrixArrayInstanced(walkPanelGeo, walkSignalGlow, walkBoxMatrices, false);
   addMatrixArrayInstanced(lampHousingGeo, poleMetalMat, lampHeadMatrices);
   addMatrixArrayInstanced(lampLensGeo, lampBulbGlow, lampHeadMatrices, false);
-  addMatrixArrayInstanced(pedLampPostGeo, poleMetalMat, pedPostMatrices);
+  const pedPosts = addMatrixArrayInstanced(pedLampPostGeo, poleMetalMat, pedPostMatrices);
+  // ~28k posts: they cast as 4-sided base + shaft (16 triangles instead of 120; scene-culling.js shadow stand-ins)
+  if (pedPosts) {
+    pedPosts.userData.shadowStandIn = mergeGeometries([
+      new THREE.CylinderGeometry(0.12, 0.18, 0.85, 4, 1, true).translate(0, 0.425, 0),
+      new THREE.CylinderGeometry(0.072, 0.094, 2.85, 4, 1, true).translate(0, 2.275, 0)
+    ]);
+  }
   addMatrixArrayInstanced(pedGlobeGeo, pedGlobeGlow, pedPostMatrices, false);
 
   // =========================================================================
