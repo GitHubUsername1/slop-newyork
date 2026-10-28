@@ -377,32 +377,16 @@ const evaluateApartmentInterior = Fn(([uCoord, vCoord, winUV, cellId, winWNode, 
   return vec4(finalRoomCol, mix(litRoom, distantLit, lod).mul(bestEmit));
 });
 
-/**
- * Treatment of each wall of a box-local facade box (createFacadeBoxes `faces`, read by facadeCell). shop: street front
- * with storefronts on the ground floor; entry: residential street front, windows down to the ground floor and one
- * entrance door; rear: yard, court & air-shaft walls, plain common brick with windows on every floor; lotLine:
- * windowless lot-line (party) wall, common brick or grey parging; blankStone: windowless wall in the facade's stone.
- */
-const WALL_KINDS = { shop: 0, entry: 1, rear: 2, lotLine: 3, blankStone: 4 };
+// Street fronts have ground-floor shops; courtyard walls use common brick and windows on every floor.
+const WALL_KINDS = { shop: 0, rear: 2 };
 
 /**
- * Facade cell coordinates shared by the curtain-wall & pre-war materials: wall UV (u runs along whichever horizontal
- * axis the wall faces, v is world height), window cell id/UV, bay width, pixel footprint in cells (`fw`, for
- * filtering) and roof/ground-floor masks.
- * World-space by default. With `boxLocal` the mesh must come from createFacadeBoxes: u then starts at each wall's
- * corner and every wall fits a whole number of bays, so no window straddles a corner. `cornerPier` (m, box-local only)
- * keeps a solid band of wall at both ends of every wall (masonry corners): the bays fill the width between the piers
- * and `solid` is 1 inside the piers above the ground floor, where callers suppress windows, sills & AC units.
- * With `footprintLocal`, createBuildingFootprints supplies the same wall frame explicitly for arbitrary polygons.
- * Box-local walls also read their treatment from the per-instance `faces` attribute (see WALL_KINDS / createFacadeBoxes):
- * `isGroundFloor` is 1 only on storefront ground floors, `door` marks the entrance bay of residential fronts, `back`
- * the plain common-brick rear & lot-line walls (tinted by the building's `tone`) and `blank` the windowless ones
- * (folded into `solid`); `wallS`, `wallW`, `wallH`, `fromTop` & `boxSeed` place things on the wall (painted signs).
- * Plain JS (not Fn) so it inlines into each node graph exactly like hand-written code.
+ * Shared facade coordinates and masks. World-space by default; createFacadeBoxes and createBuildingFootprints
+ * supply wall dimensions to fit whole window bays between the corners. `cornerPier` reserves solid masonry
+ * at each end above the ground-floor shops. Partial storeys and the coping remain solid at each wall's top.
  */
 function facadeCell(windowWidth, floorHeight, boxLocal, cornerPier = 0, footprintLocal = false) {
-  // Box-local walls are told apart by the box's own normals (createFacadeBoxes instances may be turned about +y to
-  // follow a non-grid street); world-space walls by the world normal
+  // Local walls use geometry normals; world-space walls use the stable facade frame.
   const nWall = boxLocal ? normalGeometry : facadeWorldNormal;
   const nW = abs(nWall);
   const isRoof = step(0.75, nW.y);
@@ -413,56 +397,33 @@ function facadeCell(windowWidth, floorHeight, boxLocal, cornerPier = 0, footprin
   let inPier = float(0.0);
   let kind = float(WALL_KINDS.shop);
   let tone = float(0.5);
-  let bayIdx = float(0.0); // bay index along the wall (0 at its corner; -1 / bays inside the corner piers)
-  let bays = float(1.0);
-  // Box-local wall frame: metres along the wall (from its left end, seen facing it), its width & height, metres
-  // below the box's top
-  let wallS = float(0.0);
-  let wallW = float(1.0);
   let wallH = float(1.0);
   let fromTop = float(0.0);
-  let boxSeed = float(0.0);
 
   if (boxLocal) {
     const box = attribute('box', 'vec4'); // width, height, depth, seed (+ the building's tone in its fraction)
     // Merged footprints carry normalized distance along each wall, metres below its top, and its WALL_KINDS treatment.
     const wall = footprintLocal ? attribute('facadeWall', 'vec3') : null;
     const wallWidth = footprintLocal ? box.x : mix(box.x, box.z, alongZ);
-    if (footprintLocal) {
-      kind = wall.z;
-    } else {
-      const faces = attribute('faces', 'vec4'); // WALL_KINDS of the -x, +x, -z & +z walls
-      kind = mix(
-        mix(faces.z, faces.w, step(0.0, nWall.z)),
-        mix(faces.x, faces.y, step(0.0, nWall.x)),
-        alongZ
-      );
-    }
+    if (footprintLocal) kind = wall.z;
     // The seed's fraction (0.1..0.9, never near an integer so floor() is stable on inexact varyings) is the tone
     tone = fract(box.w).sub(0.1).div(0.8);
-    boxSeed = floor(box.w);
     // Whole-bay offset per wall so walls don't repeat each other's windows
     const wallSeed = floor(box.w.add(dot(nWall, vec3(17.0, 0.0, 37.0))));
     const along = footprintLocal ? wall.x : mix(positionGeometry.x, positionGeometry.z, alongZ).add(0.5); // 0..1 along the wall
-    wallW = wallWidth;
-    // Reading left to right for someone facing the wall
-    const flip = mix(step(nWall.z, 0.0), step(0.0, nWall.x), alongZ);
-    wallS = mix(along, float(1.0).sub(along), flip).mul(wallWidth);
     wallH = box.y;
     fromTop = footprintLocal ? wall.y : float(0.5).sub(positionGeometry.y).mul(box.y);
     if (cornerPier > 0) {
       const pier = min(float(cornerPier), wallWidth.mul(0.2));
       const inner = wallWidth.sub(pier.mul(2.0));
-      bays = max(floor(inner.div(windowWidth).add(0.5)), 1.0);
+      const bays = max(floor(inner.div(windowWidth).add(0.5)), 1.0);
       const s = along.mul(wallWidth); // metres from the wall's corner
       bayWidth = inner.div(bays);
-      bayIdx = floor(s.sub(pier).div(bayWidth));
       gridU = s.sub(pier).div(bayWidth).add(wallSeed);
       inPier = float(1.0).sub(step(pier, s).mul(step(s, wallWidth.sub(pier))));
     } else {
-      bays = max(floor(wallWidth.div(windowWidth).add(0.5)), 1.0);
+      const bays = max(floor(wallWidth.div(windowWidth).add(0.5)), 1.0);
       bayWidth = wallWidth.div(bays);
-      bayIdx = floor(along.mul(bays));
       gridU = along.mul(bays).add(wallSeed);
     }
     uCoord = gridU.mul(bayWidth);
@@ -478,11 +439,7 @@ function facadeCell(windowWidth, floorHeight, boxLocal, cornerPier = 0, footprin
   const floor0 = float(1.0).sub(step(1.0, gridV));
   const wall = float(1.0).sub(isRoof);
   const isGroundFloor = floor0.mul(float(1.0).sub(step(WALL_KINDS.shop + 0.5, kind)));
-  const blank = step(WALL_KINDS.lotLine - 0.5, kind).mul(wall);
-  const back = step(WALL_KINDS.rear - 0.5, kind).mul(float(1.0).sub(step(WALL_KINDS.blankStone - 0.5, kind))).mul(wall);
-  // One entrance per residential front, in a bay picked by the building's tone
-  const isEntry = step(WALL_KINDS.entry - 0.5, kind).mul(float(1.0).sub(step(WALL_KINDS.entry + 0.5, kind)));
-  const door = floor0.mul(isEntry).mul(wall).mul(step(abs(bayIdx.sub(min(floor(tone.mul(bays)), bays.sub(1.0)))), 0.5));
+  const back = step(WALL_KINDS.rear - 0.5, kind).mul(wall);
   // A box that isn't a whole number of storeys (landmark tiers) ends in a solid parapet instead of slicing a row of
   // windows, and starts with one above the roof it stands on; every wall is capped by a coping at its top
   let partial = float(0.0);
@@ -494,10 +451,9 @@ function facadeCell(windowWidth, floorHeight, boxLocal, cornerPier = 0, footprin
     partial = float(1.0).sub(whole).mul(wall);
     coping = float(1.0).sub(step(0.32, fromTop)).mul(wall);
   }
-  const solid = max(max(inPier.mul(float(1.0).sub(isGroundFloor)), blank), partial);
+  const solid = max(inPier.mul(float(1.0).sub(isGroundFloor)), partial);
   return {
-    isRoof, uCoord, vCoord, gridV, cellId, cellUV, fw, bayWidth, isGroundFloor, solid, floor0, back, blank, door, tone,
-    wallS, wallW, wallH, fromTop, boxSeed, partial, coping
+    isRoof, uCoord, vCoord, gridV, cellId, cellUV, fw, bayWidth, isGroundFloor, solid, back, tone, partial, coping
   };
 }
 
@@ -551,7 +507,7 @@ function createCurtainWallMaterial(opts = {}) {
   // The facade cell and the apartment behind each pane are built once and shared by every output below, so the
   // shader carries a single copy of them (and evaluates the interior mapping once per pixel)
   const facade = facadeCell(uWindowWidth, uFloorHeight, boxLocal || footprintLocal, 0, footprintLocal);
-  const { isRoof, uCoord, vCoord, gridV, cellId, cellUV, fw, bayWidth, isGroundFloor, blank, tone, partial, coping } = facade;
+  const { isRoof, uCoord, vCoord, gridV, cellId, cellUV, fw, bayWidth, isGroundFloor, partial, coping } = facade;
   // Pane UV inside the mullions & spandrel, the 3D apartment behind it and whether the ground-floor shop is lit
   const winUV = clamp(
     vec2(
@@ -633,13 +589,8 @@ function createCurtainWallMaterial(opts = {}) {
     const mechCol = mix(cFrame.mul(0.36), cFrame.mul(0.76), louverStripes);
     const finalWall = mix(facadeCol, mechCol, isMechFloor.mul(float(1.0).sub(isRoof)));
 
-    // Windowless lot-line walls: weathered precast concrete panels, a panel per bay & storey
-    const panelJoint = max(filteredPulse(cellUV.x, 0.0, 0.025, fw.x), filteredPulse(cellUV.y, 0.0, 0.03, fw.y));
-    const panelStain = noise2D(vec2(uCoord.mul(0.9), vCoord.mul(0.04))).mul(float(1.0).sub(smoothstep(0.4, 1.2, fwidth(uCoord))));
-    const panelCol = mix(color(0x8a867e), color(0xaaa59b), tone).mul(panelStain.mul(0.16).add(0.9)).mul(float(1.0).sub(panelJoint.mul(0.3)));
-    const withBlank = mix(finalWall, panelCol.add(canyonGlow), blank);
     // Brushed-aluminium coping capping every wall
-    const withCap = mix(withBlank, mix(cFrame, color(0xc9ced3), 0.45), coping);
+    const withCap = mix(finalWall, mix(cFrame, color(0xc9ced3), 0.45), coping);
 
     return mix(withCap, roofColor, isRoof);
   })();
@@ -650,11 +601,8 @@ function createCurtainWallMaterial(opts = {}) {
     );
     const sillDirt = float(1.0).sub(smoothstep(spandrelRatio, spandrelRatio + 0.18, cellUV.y)).mul(0.18);
     const glassOrFrame = mix(float(0.05).add(sillDirt), float(0.54), max(max(isFrame, isRoof), partial));
-    return mix(mix(glassOrFrame, float(0.36), coping), float(0.88), blank);
+    return mix(glassOrFrame, float(0.36), coping);
   })();
-
-  // Glass & metal, but the concrete lot-line walls aren't
-  mat.metalnessNode = mix(float(0.72), float(0.0), blank);
 
   // Hardware derivative bumpNormal for raised curtain-wall mullions & spandrel channels (ramps >= 2px, see pre-war)
   mat.normalNode = Fn(() => {
@@ -666,7 +614,7 @@ function createCurtainWallMaterial(opts = {}) {
     const inPane = filteredPulse(cellUV.x, mullionThickness + 0.01, 0.99 - mullionThickness, ramp.x)
       .mul(filteredPulse(cellUV.y, spandrelRatio + 0.01, 0.99 - mullionThickness, ramp.y))
       .mul(float(1.0).sub(partial)).mul(float(1.0).sub(coping));
-    const mullionRelief = float(1.0).sub(inPane).mul(0.014).mul(float(1.0).sub(blank)).add(coping.mul(0.01));
+    const mullionRelief = float(1.0).sub(inPane).mul(0.014).add(coping.mul(0.01));
 
     return bumpNormal(mullionRelief.mul(detailFade));
   })();
@@ -674,7 +622,7 @@ function createCurtainWallMaterial(opts = {}) {
   mat.emissiveNode = Fn(() => {
     const inPane = filteredPulse(cellUV.x, mullionThickness + 0.015, 1.0 - mullionThickness - 0.015, fw.x)
       .mul(filteredPulse(cellUV.y, spandrelRatio + 0.02, 1.0 - mullionThickness * 0.5, fw.y));
-    const paneMask = inPane.mul(float(1.0).sub(isRoof)).mul(float(1.0).sub(isMechFloor)).mul(float(1.0).sub(blank))
+    const paneMask = inPane.mul(float(1.0).sub(isRoof)).mul(float(1.0).sub(isMechFloor))
       .mul(float(1.0).sub(partial)).mul(float(1.0).sub(coping));
 
     const shopShelves = float(1.0).sub(step(0.78, fract(winUV.y.mul(3.0))).mul(0.32));
@@ -758,10 +706,9 @@ function createPreWarBuildingMaterial(opts = {}) {
   // The facade cell, the window opening and the apartment behind it are built once and shared by every output below,
   // so the shader carries a single copy of them (and evaluates the interior mapping once per pixel)
   const facade = facadeCell(uWindowWidth, uFloorHeight, boxLocal || footprintLocal, cornerPier, footprintLocal);
-  const { isRoof, uCoord, vCoord, gridV, cellId, cellUV, fw, bayWidth, isGroundFloor, solid, back, blank, door, tone } = facade;
-  const { wallS, wallW, wallH, fromTop, boxSeed, coping } = facade;
-  const open = float(1.0).sub(solid).mul(float(1.0).sub(door)); // 0 in the corner piers, blank walls & doorways
-  const front = float(1.0).sub(back).sub(blank).max(0.0); // street fronts (band courses, sills under the band...)
+  const { isRoof, uCoord, vCoord, gridV, cellId, cellUV, fw, bayWidth, isGroundFloor, solid, back, tone, coping } = facade;
+  const open = float(1.0).sub(solid);
+  const front = float(1.0).sub(back);
   const effHalfX = mix(float(halfWinX), float(0.11), isGroundFloor);
   const effHalfY = mix(float(halfWinY), float(0.10), isGroundFloor);
   // Glazing UV inside the window opening, the 3D apartment behind it and the storefront lighting
@@ -833,23 +780,16 @@ function createPreWarBuildingMaterial(opts = {}) {
     const rowCoord = vCoord.div(brickH);
     const courseRow = floor(rowCoord);
     const colCoord = uCoord.div(brickL).add(mod(courseRow, 2.0).mul(0.5));
-    // Rear, court & lot-line walls are plain common brick (red-brown or buff by building); lot-line walls weather in
-    // patches of grey parging (worked out on those walls only), some are parged all over
+    // Courtyard walls use common brick, red-brown or buff by building.
     const backBrick = mix(
       mix(color(0x6c3d30), color(0x8a503e), fract(tone.mul(7.31))),
       mix(color(0x9a8669), color(0xb09a7a), fract(tone.mul(5.17))),
       step(0.58, tone)
     );
-    const parged = float(0.0).toVar();
-    If(blank.mul(back).greaterThan(0.5), () => {
-      const pargePatch = smoothstep(0.6, 0.76, noise2D(vec2(uCoord.mul(0.11), vCoord.mul(0.07)).add(tone.mul(37.0))));
-      parged.assign(max(step(0.74, fract(tone.mul(3.7))), pargePatch.mul(0.85)));
-    });
-    const backTint = mix(backBrick, color(0x8f8b84), parged);
     const mortarJoint = max(
       gridLine(colCoord.mul(brickL), brickL, 0.016),
       gridLine(vCoord, brickH, 0.016)
-    ).mul(float(1.0).sub(isRoof)).mul(float(1.0).sub(parged)).mul(float(1.0).sub(coping));
+    ).mul(float(1.0).sub(isRoof)).mul(float(1.0).sub(coping));
 
     // Per-brick tint fades out once bricks shrink to a pixel (and soot streaks once they do), so neither can shimmer
     const uFw = fwidth(uCoord);
@@ -874,51 +814,7 @@ function createPreWarBuildingMaterial(opts = {}) {
     const canyonBand = smoothstep(0.0, 14.0, vCoord).mul(float(1.0).sub(smoothstep(22.0, 75.0, vCoord)));
     const canyonGlow = cCanyonBounce.mul(canyonBand.mul(cityUniforms.uCanyonBounce).mul(0.22));
 
-    // Faded painted advertisement ("ghost sign") high on some lot-line walls: a panel with a line of tall block letters
-    // over a smaller one, flaking off the brick. The lettering is only worked out inside the panel.
-    const signW = min(wallW.sub(3.0), 18.0);
-    const signH = min(min(wallH.mul(0.3), signW.mul(0.42)), 6.5);
-    const hasSign = blank.mul(back).mul(float(1.0).sub(step(0.74, fract(tone.mul(3.7)))))
-      .mul(step(0.8, fract(tone.mul(13.7).add(boxSeed.mul(0.618)))))
-      .mul(step(5.0, signW)).mul(step(2.6, signH));
-    const su = wallS.sub(wallW.sub(signW).mul(0.5)).div(signW); // 0..1 across the panel
-    const sv = fromTop.sub(1.2).div(signH); // 0..1 down the panel
-    const signFw = vec2(fwidth(su), fwidth(sv));
-    const signPaint = vec4(0.0).toVar();
-    If(hasSign.mul(step(0.0, su)).mul(step(su, 1.0)).mul(step(0.0, sv)).mul(step(sv, 1.0)).greaterThan(0.5), () => {
-      const pal = fract(tone.mul(29.3));
-      const ground = mix(mix(color(0xd3c9ae), color(0x86392b), step(0.5, pal)), color(0x2b3340), step(0.8, pal));
-      const ink = mix(mix(color(0x6b2a20), color(0xddd2b6), step(0.5, pal)), color(0xd5c086), step(0.8, pal));
-      const border = float(1.0).sub(filteredPulse(su, 0.02, 0.98, signFw.x).mul(filteredPulse(sv, 0.045, 0.955, signFw.y)));
-      // Block letters: a vertical at the left (or middle) and maybe the right, bars at the top / middle / bottom
-      const lettering = (v0, v1, line) => {
-        const glyphW = signH.mul((v1 - v0) * 0.64);
-        const n = floor(signW.mul(0.86).div(glyphW));
-        const gx = su.mul(signW).sub(signW.sub(n.mul(glyphW)).mul(0.5)).div(glyphW);
-        const fy = sv.sub(v0).div(v1 - v0);
-        const wx = signFw.x.mul(signW).div(glyphW);
-        const wy = signFw.y.div(v1 - v0);
-        const fx = fract(gx);
-        const h1 = hash2D(vec2(floor(gx).add(line * 31.0), tone.mul(91.0)));
-        const h2 = hash2D(vec2(floor(gx).add(line * 31.0 + 7.0), tone.mul(53.0)));
-        const verticals = max(
-          max(filteredPulse(fx, 0.1, 0.28, wx).mul(step(0.22, h1)), filteredPulse(fx, 0.41, 0.59, wx).mul(step(h1, 0.22))),
-          filteredPulse(fx, 0.72, 0.9, wx).mul(step(0.45, h2))
-        );
-        const bars = max(
-          max(filteredPulse(fy, 0.0, 0.17, wy).mul(step(0.35, fract(h1.mul(7.0)))), filteredPulse(fy, 0.42, 0.58, wy).mul(step(0.5, fract(h2.mul(5.0))))),
-          filteredPulse(fy, 0.83, 1.0, wy).mul(step(0.4, fract(h1.mul(3.0))))
-        ).mul(filteredPulse(fx, 0.1, 0.9, wx));
-        const inText = step(0.0, gx).mul(step(gx, n)).mul(step(0.0, fy)).mul(step(fy, 1.0)).mul(step(0.1, fract(h2.mul(11.0))));
-        return max(verticals, bars).mul(inText);
-      };
-      const letters = max(lettering(0.14, 0.56, 0), lettering(0.66, 0.86, 1));
-      const flake = smoothstep(0.5, 0.74, noise2D(vec2(wallS.mul(0.7), fromTop.mul(1.1)).add(tone.mul(31.0))));
-      const cover = mix(float(0.34), float(0.66), fract(tone.mul(7.7))).mul(float(1.0).sub(flake.mul(0.9)));
-      signPaint.assign(vec4(mix(ground, ink, max(letters, border)), cover));
-    });
-
-    const wallTint = mix(mix(cStone, backTint, back), signPaint.xyz, signPaint.w);
+    const wallTint = mix(cStone, backBrick, back);
     // Trim stone on the band courses, the storefront fascia and the coping capping every wall
     const trimMix = max(isCornice.mul(0.62).add(isGroundFloor.mul(0.28)), coping.mul(0.8));
     const masonryTint = mix(wallTint, cTrim, trimMix)
@@ -956,26 +852,7 @@ function createPreWarBuildingMaterial(opts = {}) {
     const wallOrRoof = mix(masonryWeathered, roofCol, isRoof);
     const withFrames = mix(wallOrRoof, frameCol, isWindowOpening.mul(sashMask));
     const withGlass = mix(withFrames, glassCol, isWindowGlass);
-    const withAC = mix(withGlass, acColor, inACBox);
-
-    // Entrance of a residential front: painted panel door under a glazed transom, in a stone surround (door bay only)
-    const finalCol = withAC.toVar();
-    If(door.greaterThan(0.5), () => {
-      const inDoorway = filteredPulse(cellUV.x, 0.27, 0.73, fw.x).mul(filteredPulse(cellUV.y, 0.065, 0.8, fw.y));
-      const surround = filteredPulse(cellUV.x, 0.21, 0.79, fw.x).mul(filteredPulse(cellUV.y, 0.0, 0.86, fw.y));
-      const transom = filteredPulse(cellUV.y, 0.67, 0.78, fw.y);
-      const doorRnd = fract(tone.mul(11.3));
-      const doorPaint = mix(
-        mix(color(0x1c1b1a), color(0x4c2018), step(0.35, doorRnd)),
-        mix(color(0x203528), color(0x6a4628), step(0.8, doorRnd)),
-        step(0.6, doorRnd)
-      );
-      // Meeting stiles & lock rail (box-filtered with the cell footprint: no derivatives in this branch)
-      const doorPanels = max(filteredPulse(cellUV.x, 0.494, 0.506, fw.x), filteredPulse(cellUV.y, 0.39, 0.41, fw.y));
-      const doorCol = mix(doorPaint.mul(float(1.0).sub(doorPanels.mul(0.5))), mix(cGlass, cityUniforms.uSkyHorizonColor, 0.18), transom);
-      finalCol.assign(mix(mix(withAC, cTrim.mul(0.85), surround), doorCol, inDoorway));
-    });
-    return finalCol;
+    return mix(withGlass, acColor, inACBox);
   })();
 
   mat.roughnessNode = Fn(() => {
@@ -1077,41 +954,24 @@ function createPreWarBuildingMaterial(opts = {}) {
     const crownMask = smoothstep(uCrownGlowHeight, uCrownGlowHeight.add(26.0), vCoord).mul(float(1.0).sub(isRoof.mul(0.5)));
     const crownFlood = cCrown.mul(crownMask).mul(cityUniforms.uInteriorGlow).mul(0.55);
 
-    // Lit hallway behind the entrance transom
-    const transomGlow = door.mul(filteredPulse(cellUV.x, 0.27, 0.73, fw.x)).mul(filteredPulse(cellUV.y, 0.67, 0.78, fw.y));
-    const doorEmit = cWarmWindow.mul(transomGlow).mul(cityUniforms.uInteriorGlow).mul(0.32);
-
-    return winEmit.add(crownFlood).add(doorEmit);
+    return winEmit.add(crownFlood);
   })();
 
   _preWarCache.set(cacheKey, mat);
   return mat;
 }
 
-/**
- * Instanced unit boxes for the facade materials' `boxLocal` mode, one per { x, y, z, w, h, d, faces?, tone?, ry? }
- * (y = centre; ry: turn about +y, for blocks laid out along a non-grid street), with the per-instance `box` attribute
- * (size + a spread seed carrying the building's tone in its fraction) that lays each wall out in whole window bays,
- * and `faces`: the WALL_KINDS of the box's -x, +x, -z & +z walls (storefront fronts all round when omitted).
- */
+// Axis-aligned landmark boxes, with dimensions and a seed for whole-bay facade layouts.
 function createFacadeBoxes(material, boxes) {
   const geometry = new THREE.BoxGeometry(1, 1, 1);
   const box = new THREE.InstancedBufferAttribute(new Float32Array(boxes.length * 4), 4);
-  const faces = new THREE.InstancedBufferAttribute(new Float32Array(boxes.length * 4), 4);
   geometry.setAttribute('box', box);
-  geometry.setAttribute('faces', faces);
 
   const mesh = new THREE.InstancedMesh(geometry, material, boxes.length);
   const matrix = new THREE.Matrix4();
-  const pos = new THREE.Vector3();
-  const quat = new THREE.Quaternion();
-  const scale = new THREE.Vector3();
-  const up = new THREE.Vector3(0, 1, 0);
   boxes.forEach((b, i) => {
-    if (b.ry) mesh.setMatrixAt(i, matrix.compose(pos.set(b.x, b.y, b.z), quat.setFromAxisAngle(up, b.ry), scale.set(b.w, b.h, b.d)));
-    else mesh.setMatrixAt(i, matrix.makeScale(b.w, b.h, b.d).setPosition(b.x, b.y, b.z));
-    box.setXYZW(i, b.w, b.h, b.d, ((i * 29) % 1000) + 0.1 + 0.8 * (b.tone ?? 0.5));
-    if (b.faces) faces.setXYZW(i, b.faces[0], b.faces[1], b.faces[2], b.faces[3]);
+    mesh.setMatrixAt(i, matrix.makeScale(b.w, b.h, b.d).setPosition(b.x, b.y, b.z));
+    box.setXYZW(i, b.w, b.h, b.d, ((i * 29) % 1000) + 0.5);
   });
   return mesh;
 }
