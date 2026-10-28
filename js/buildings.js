@@ -1910,12 +1910,12 @@ function buildCityBlocks(scene, landmarkColliders = []) {
         (c.maxX - c.minX) / 2, (c.maxZ - c.minZ) / 2))));
   const landmarkReserves = [...LANDMARK_RESERVE, ...landmarkColliders.map((c) =>
     ({ x0: c.minX, x1: c.maxX, z0: c.minZ, z1: c.maxZ }))];
-  const surveyedReserves = surveyedBuildings.map((b) => ({
-    x0: b.minX - 0.8, x1: b.maxX + 0.8, z0: b.minZ - 0.8, z1: b.maxZ + 0.8, polygons: b.polygons
-  }));
   const hitR = (a, x0, x1, z0, z1) => a.x0 < x1 && a.x1 > x0 && a.z0 < z1 && a.z1 > z0;
+  const buildingReserves = [];
   const reserveCells = new Map();
-  surveyedReserves.forEach((r, index) => {
+  function addReserve(r) {
+    const index = buildingReserves.length;
+    buildingReserves.push(r);
     for (let ix = Math.floor(r.x0 / 128); ix <= Math.floor(r.x1 / 128); ix++) {
       for (let iz = Math.floor(r.z0 / 128); iz <= Math.floor(r.z1 / 128); iz++) {
         const key = ix + ',' + iz;
@@ -1923,18 +1923,21 @@ function buildCityBlocks(scene, landmarkColliders = []) {
         reserveCells.get(key).push(index);
       }
     }
+  }
+  for (const b of surveyedBuildings) addReserve({
+    x0: b.minX - 0.8, x1: b.maxX + 0.8, z0: b.minZ - 0.8, z1: b.maxZ + 0.8, polygons: b.polygons
   });
   function reservesForBlock(b) {
     const found = new Set();
     for (let ix = Math.floor(b.minX / 128); ix <= Math.floor(b.maxX / 128); ix++) {
       for (let iz = Math.floor(b.minZ / 128); iz <= Math.floor(b.maxZ / 128); iz++) {
         for (const index of reserveCells.get(ix + ',' + iz) || []) {
-          if (hitR(surveyedReserves[index], b.minX, b.maxX, b.minZ, b.maxZ)) found.add(index);
+          if (hitR(buildingReserves[index], b.minX, b.maxX, b.minZ, b.maxZ)) found.add(index);
         }
       }
     }
     // Preserve the subtraction order so the remaining procedural lots stay deterministic.
-    return [...found].sort((a, b) => a - b).map((index) => surveyedReserves[index]);
+    return [...found].sort((a, b) => a - b).map((index) => buildingReserves[index]);
   }
   // [x0, x1, z0, z1] minus the reserved rects, as up to four slabs per hole (strips across the full depth first). In a
   // frontage frame the reserves are their bounds in the frame
@@ -2012,6 +2015,58 @@ function buildCityBlocks(scene, landmarkColliders = []) {
   }
   minLot = 15;
 
+  // Reuse the reservation grid to keep fire escapes clear of all neighbouring buildings.
+  for (const r of [...landmarkReserves, ...allBlocks.flatMap((b) => b.footprints)]) {
+    addReserve({ ...r, polygons: [{ outer: r.pts || [
+      { x: r.x0, z: r.z0 }, { x: r.x1, z: r.z0 }, { x: r.x1, z: r.z1 }, { x: r.x0, z: r.z1 }
+    ], holes: [] }] });
+  }
+  function reserveFireEscape(fe) {
+    const angle = (fe.ry || 0) + fe.facing, cs = Math.cos(angle), sn = Math.sin(angle);
+    const outer = [[-1.7, -0.55], [1.7, -0.55], [1.7, 0.57], [-1.7, 0.57]].map(([x, z]) =>
+      ({ x: fe.x + x * cs + z * sn, z: fe.z - x * sn + z * cs }));
+    const xs = outer.map((p) => p.x), zs = outer.map((p) => p.z);
+    const r = { x0: Math.min(...xs), x1: Math.max(...xs), z0: Math.min(...zs), z1: Math.max(...zs),
+      polygons: [{ outer, holes: [] }] };
+    addReserve(r);
+    return r;
+  }
+  for (const block of allBlocks) for (const fe of block.fireEscapes) reserveFireEscape(fe);
+
+  function addSurveyedFireEscapes(b, detail, storey) {
+    if (!b.year || b.year >= 1945 || b.height > 30) return;
+    const floors = Math.floor((b.height + 0.22) / storey);
+    if (floors < 3) return;
+    const landings = Math.min(floors - 1, 7), h = (landings - 1) * storey + 1;
+    const neighbours = reservesForBlock({
+      minX: b.minX - 2, maxX: b.maxX + 2, minZ: b.minZ - 2, maxZ: b.maxZ + 2
+    });
+    for (const polygon of b.polygons) {
+      for (const ring of [polygon.outer, ...polygon.holes]) {
+        for (let i = 0; i < ring.length; i++) {
+          const a = ring[i], c = ring[(i + 1) % ring.length];
+          const dx = c.x - a.x, dz = c.z - a.z, length = Math.hypot(dx, dz);
+          if (length < 4.6) continue;
+          const nx = dz / length, nz = -dx / length;
+          const count = length >= 15 ? 2 : 1;
+          for (let k = 0; k < count; k++) {
+            const t = (k + 0.5) / count, x = a.x + dx * t, z = a.z + dz * t;
+            // The clearance box starts just outside the wall, including on concave footprints.
+            if (neighbours.some((r) => r.polygons.some((p) =>
+              polygonBoxOverlaps(p, x + nx * 0.75, z + nz * 0.75, 1.9, 0.65, nz, nx)))) continue;
+            const fe = {
+              x: x + nx * 0.55, y: storey + 0.1, z: z + nz * 0.55, h, storey, landings,
+              facing: Math.atan2(nx, nz)
+            };
+            detail.fireEscapes.push(fe);
+            neighbours.push(reserveFireEscape(fe));
+            if (detail.fireEscapes.length === 4) return;
+          }
+        }
+      }
+    }
+  }
+
   const surveyedBuckets = materials.map(() => []);
   for (const b of surveyedBuildings) {
     const tone = mulberry32(Math.round(b.cx * 31 + b.cz * 17))();
@@ -2027,6 +2082,8 @@ function buildCityBlocks(scene, landmarkColliders = []) {
       colliders.push({ minX, maxX, minZ, maxZ, minY: 0, maxY: detail.maxH, polygon });
       detail.footprints.push({ x0: minX, x1: maxX, z0: minZ, z1: maxZ, h: detail.maxH, tone, pts: polygon.outer, holes: polygon.holes });
     }
+    addSurveyedFireEscapes(b, detail, storeys[mat]);
+    if (detail.fireEscapes.length) quadtree.insert(detail);
     allBlocks.push(detail);
   }
   surveyedBuckets.forEach((items, i) => {
@@ -2450,14 +2507,14 @@ function buildCityBlocks(scene, landmarkColliders = []) {
     let hvacCount = 0;
     fireEscapeSystem.begin();
     let awningCount = 0;
+    let awningBlocks = 0;
     let shedCount = 0;
     const signCounts = signInsts.map(() => 0);
 
-    for (let bIdx = 0; bIdx < nearbyBlocks.length; bIdx++) {
-      const blk = nearbyBlocks[bIdx];
+    for (const blk of nearbyBlocks) {
       // every piece of a block turned into a frontage frame shares its turn (see placeInFrame)
       dummy.rotation.set(0, blk.ry || 0, 0);
-      const collectNearLights = bIdx < 20;
+      const collectNearLights = blk.awnings.length > 0 && awningBlocks++ < 20;
 
       // 1. Stone cornices & setback ledges, hung just below their roof line (top 0.1h under it, so no two ledges or
       //    roofs share a plane) so roofs & terraces keep their own roofing instead of a stone lid
