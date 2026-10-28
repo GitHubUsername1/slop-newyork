@@ -6,12 +6,7 @@ function createBuildingFootprints(material, records) {
   const cells = new Map();
   records.forEach((record, index) => {
     if (!(record.height > 0)) return;
-    let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
-    for (const polygon of record.polygons) for (const p of polygon.outer) {
-      minX = Math.min(minX, p.x); maxX = Math.max(maxX, p.x);
-      minZ = Math.min(minZ, p.z); maxZ = Math.max(maxZ, p.z);
-    }
-    const key = Math.floor((minX + maxX) / 2000) + ',' + Math.floor((minZ + maxZ) / 2000);
+    const key = Math.floor(record.cx / 1000) + ',' + Math.floor(record.cz / 1000);
     let cell = cells.get(key);
     if (!cell) cells.set(key, (cell = { positions: [], normals: [], indices: [], boxes: [], walls: [] }));
     const height = record.height, top = height + 0.22;

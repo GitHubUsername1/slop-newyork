@@ -42,7 +42,13 @@ const { createBuildingFootprints } = loadModule(readFileSync(join(__dirname, '..
 });
 const p = (x, z) => ({ x, z });
 const square = (x = 0) => [p(x, 0), p(x + 10, 0), p(x + 10, 10), p(x, 10)];
-const record = (outer, extra = {}) => ({ polygons: [{ outer }], height: 60, seed: 123, tone: 0.75, ...extra });
+const record = (outer, extra = {}) => {
+  const b = { polygons: [{ outer }], height: 60, seed: 123, tone: 0.75, ...extra };
+  const points = b.polygons.flatMap(p => p.outer);
+  b.cx = (Math.min(...points.map(p => p.x)) + Math.max(...points.map(p => p.x))) / 2;
+  b.cz = (Math.min(...points.map(p => p.z)) + Math.max(...points.map(p => p.z))) / 2;
+  return b;
+};
 const build = records => { triangulations = []; return createBuildingFootprints({}, records); };
 const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-5, `${actual} != ${expected}`);
 
