@@ -214,6 +214,11 @@ function setupSceneCulling(scene, roots, shadow = null) {
       root.traverse((o) => {
         if (!o.castShadow || !isStaticMesh(o) || !proxyableMaterial(o.material)) return;
         if (o.isInstancedMesh && o.count !== o.instanceMatrix.count) return;
+        // Pre-chunked casters (building-footprints.js) are big together, but each chunk falls under the size limits
+        if (o.userData.shadowStandIn) {
+          sources.push(o);
+          return;
+        }
         const tris = triangleCount(o.geometry) * (o.isInstancedMesh ? o.count : 1);
         if (tris < 20000) return;
         let radius;

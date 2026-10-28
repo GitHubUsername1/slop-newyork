@@ -89,6 +89,8 @@ function createBuildingFootprints(material, records, getNeighbours) {
     const mesh = new THREE.Mesh(geometry, material);
     mesh.name = 'SurveyedBuildingChunk';
     mesh.castShadow = mesh.receiveShadow = true;
+    // Most cells are too small for scene-culling.js to pick them as big casters on its own: opt in to its stand-ins.
+    mesh.userData.shadowStandIn = true;
     if (first) mesh.userData.sharesPipelineWith = first;
     else first = mesh;
     group.add(mesh);
