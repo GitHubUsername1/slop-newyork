@@ -274,12 +274,14 @@ function buildCityBlocks(scene, landmarkColliders = []) {
   for (const b of surveyedBuildings) addReserve({
     x0: b.minX, x1: b.maxX, z0: b.minZ, z1: b.maxZ, height: b.height + 0.22, polygons: b.polygons
   });
-  function nearbyReserves(b) {
+  function nearbyReserves(b, padding = 0) {
+    const minX = b.minX - padding, maxX = b.maxX + padding;
+    const minZ = b.minZ - padding, maxZ = b.maxZ + padding;
     const found = new Set();
-    for (let ix = Math.floor(b.minX / 128); ix <= Math.floor(b.maxX / 128); ix++) {
-      for (let iz = Math.floor(b.minZ / 128); iz <= Math.floor(b.maxZ / 128); iz++) {
+    for (let ix = Math.floor(minX / 128); ix <= Math.floor(maxX / 128); ix++) {
+      for (let iz = Math.floor(minZ / 128); iz <= Math.floor(maxZ / 128); iz++) {
         for (const index of reserveCells.get(ix + ',' + iz) || []) {
-          if (hitR(buildingReserves[index], b.minX, b.maxX, b.minZ, b.maxZ)) found.add(index);
+          if (hitR(buildingReserves[index], minX, maxX, minZ, maxZ)) found.add(index);
         }
       }
     }
@@ -358,20 +360,20 @@ function buildCityBlocks(scene, landmarkColliders = []) {
       colliders.push({ minX, maxX, minZ, maxZ, minY: 0, maxY: top, polygon });
       detail.footprints.push({ h: top, pts: polygon.outer, holes: polygon.holes });
     }
-    const neighbours = nearbyReserves({ minX: b.minX - 6, maxX: b.maxX + 6, minZ: b.minZ - 6, maxZ: b.maxZ + 6 });
+    const neighbours = nearbyReserves(b, 6);
     addSurveyedFireEscapes(b, detail, storeys[mat], neighbours);
     detailsToPlace.push({ b, detail, masonry: mat < 2, rand });
     allBlocks.push(detail);
   }
   // Reserve every fire escape before placing storefronts on neighbouring buildings.
   for (const { b, detail, masonry, rand } of detailsToPlace) {
-    const neighbours = nearbyReserves({ minX: b.minX - 6, maxX: b.maxX + 6, minZ: b.minZ - 6, maxZ: b.maxZ + 6 });
+    const neighbours = nearbyReserves(b, 6);
     for (const reserve of addBuildingDetails(b, detail, { masonry, rand, neighbours })) addReserve(reserve);
     quadtree.insert(detail);
   }
   surveyedBuckets.forEach((items, i) => {
     if (!items.length) return;
-    group.add(createBuildingFootprints(materials[i], items));
+    group.add(createBuildingFootprints(materials[i], items, i < 2 ? b => nearbyReserves(b, 2) : undefined));
   });
 
   // Narrow empty lots become sitting areas with trees.

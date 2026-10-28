@@ -154,6 +154,13 @@ const filteredPulse = Fn(([x, a, b, w]) => {
   return integral(p.add(hw)).sub(integral(p.sub(hw))).div(hw.mul(2.0));
 });
 
+// Share of [x - s, x + s] covered by the non-repeating interval [a, b].
+const boxCoverage = Fn(([x, a, b, s]) => {
+  const xv = float(x).toVar();
+  const sv = max(float(s), 0.001).toVar();
+  return clamp(min(xv.add(sv), b).sub(max(xv.sub(sv), a)).div(sv.mul(2.0)), 0.0, 1.0);
+});
+
 // Keep distant lit windows in 1–2 pixel clusters. Adjacent world-anchored scales cross-fade, and
 // the half-width inset leaves room for filtering at cell edges while preserving mean brightness.
 const distantWindowLight = Fn(([grid, fw, probability, seed, lod]) => {
@@ -377,8 +384,8 @@ const evaluateApartmentInterior = Fn(([uCoord, vCoord, winUV, cellId, winWNode, 
   return vec4(finalRoomCol, mix(litRoom, distantLit, lod).mul(bestEmit));
 });
 
-// Street fronts have ground-floor shops; courtyard walls use common brick and windows on every floor.
-const WALL_KINDS = { shop: 0, rear: 2 };
+// Street fronts have shops, courtyard walls have windows, and shared lot-line walls are solid masonry.
+const WALL_KINDS = { shop: 0, rear: 2, lotLine: 3 };
 
 /**
  * Shared facade coordinates and masks. World-space by default; createFacadeBoxes and createBuildingFootprints
@@ -397,21 +404,31 @@ function facadeCell(windowWidth, floorHeight, boxLocal, cornerPier = 0, footprin
   let inPier = float(0.0);
   let kind = float(WALL_KINDS.shop);
   let tone = float(0.5);
+  let wallS = float(0.0);
+  let wallW = float(1.0);
   let wallH = float(1.0);
+  let exposedHeight = float(1.0);
   let fromTop = float(0.0);
+  let boxSeed = float(0.0);
 
   if (boxLocal) {
-    const box = attribute('box', 'vec4'); // width, height, depth, seed (+ the building's tone in its fraction)
+    const box = attribute('box', 'vec4'); // width, height, depth (exposed height for footprints), seed + tone
     // Merged footprints carry normalized distance along each wall, metres below its top, and its WALL_KINDS treatment.
     const wall = footprintLocal ? attribute('facadeWall', 'vec3') : null;
     const wallWidth = footprintLocal ? box.x : mix(box.x, box.z, alongZ);
     if (footprintLocal) kind = wall.z;
     // The seed's fraction (0.1..0.9, never near an integer so floor() is stable on inexact varyings) is the tone
     tone = fract(box.w).sub(0.1).div(0.8);
+    boxSeed = floor(box.w);
     // Whole-bay offset per wall so walls don't repeat each other's windows
     const wallSeed = floor(box.w.add(dot(nWall, vec3(17.0, 0.0, 37.0))));
     const along = footprintLocal ? wall.x : mix(positionGeometry.x, positionGeometry.z, alongZ).add(0.5); // 0..1 along the wall
+    wallW = wallWidth;
+    // Read painted signs left to right when facing the wall.
+    const flip = mix(step(nWall.z, 0.0), step(0.0, nWall.x), alongZ);
+    wallS = mix(along, float(1.0).sub(along), flip).mul(wallWidth);
     wallH = box.y;
+    exposedHeight = footprintLocal ? box.z : box.y;
     fromTop = footprintLocal ? wall.y : float(0.5).sub(positionGeometry.y).mul(box.y);
     if (cornerPier > 0) {
       const pier = min(float(cornerPier), wallWidth.mul(0.2));
@@ -439,6 +456,7 @@ function facadeCell(windowWidth, floorHeight, boxLocal, cornerPier = 0, footprin
   const floor0 = float(1.0).sub(step(1.0, gridV));
   const wall = float(1.0).sub(isRoof);
   const isGroundFloor = floor0.mul(float(1.0).sub(step(WALL_KINDS.shop + 0.5, kind)));
+  const blank = step(WALL_KINDS.lotLine - 0.5, kind).mul(wall);
   const back = step(WALL_KINDS.rear - 0.5, kind).mul(wall);
   // A box that isn't a whole number of storeys (landmark tiers) ends in a solid parapet instead of slicing a row of
   // windows, and starts with one above the roof it stands on; every wall is capped by a coping at its top
@@ -451,9 +469,10 @@ function facadeCell(windowWidth, floorHeight, boxLocal, cornerPier = 0, footprin
     partial = float(1.0).sub(whole).mul(wall);
     coping = float(1.0).sub(step(0.32, fromTop)).mul(wall);
   }
-  const solid = max(inPier.mul(float(1.0).sub(isGroundFloor)), partial);
+  const solid = max(max(inPier.mul(float(1.0).sub(isGroundFloor)), blank), partial);
   return {
-    isRoof, uCoord, vCoord, gridV, cellId, cellUV, fw, bayWidth, isGroundFloor, solid, back, tone, partial, coping
+    isRoof, uCoord, vCoord, gridV, cellId, cellUV, fw, bayWidth, isGroundFloor, solid, back, blank, tone,
+    wallS, wallW, wallH, exposedHeight, fromTop, boxSeed, partial, coping
   };
 }
 
@@ -706,7 +725,8 @@ function createPreWarBuildingMaterial(opts = {}) {
   // The facade cell, the window opening and the apartment behind it are built once and shared by every output below,
   // so the shader carries a single copy of them (and evaluates the interior mapping once per pixel)
   const facade = facadeCell(uWindowWidth, uFloorHeight, boxLocal || footprintLocal, cornerPier, footprintLocal);
-  const { isRoof, uCoord, vCoord, gridV, cellId, cellUV, fw, bayWidth, isGroundFloor, solid, back, tone, coping } = facade;
+  const { isRoof, uCoord, vCoord, gridV, cellId, cellUV, fw, bayWidth, isGroundFloor, solid, back, blank, tone, coping } = facade;
+  const { wallS, wallW, wallH, exposedHeight, fromTop, boxSeed } = facade;
   const open = float(1.0).sub(solid);
   const front = float(1.0).sub(back);
   const effHalfX = mix(float(halfWinX), float(0.11), isGroundFloor);
@@ -780,16 +800,22 @@ function createPreWarBuildingMaterial(opts = {}) {
     const rowCoord = vCoord.div(brickH);
     const courseRow = floor(rowCoord);
     const colCoord = uCoord.div(brickL).add(mod(courseRow, 2.0).mul(0.5));
-    // Courtyard walls use common brick, red-brown or buff by building.
+    // Courtyard and party walls use common brick, with weathered parging on some party walls.
     const backBrick = mix(
       mix(color(0x6c3d30), color(0x8a503e), fract(tone.mul(7.31))),
       mix(color(0x9a8669), color(0xb09a7a), fract(tone.mul(5.17))),
       step(0.58, tone)
     );
+    const parged = float(0.0).toVar();
+    If(blank.greaterThan(0.5), () => {
+      const patch = smoothstep(0.6, 0.76, noise2D(vec2(uCoord.mul(0.11), vCoord.mul(0.07)).add(tone.mul(37.0))));
+      parged.assign(max(step(0.74, fract(tone.mul(3.7))), patch.mul(0.85)));
+    });
+    const backTint = mix(backBrick, color(0x8f8b84), parged);
     const mortarJoint = max(
       gridLine(colCoord.mul(brickL), brickL, 0.016),
       gridLine(vCoord, brickH, 0.016)
-    ).mul(float(1.0).sub(isRoof)).mul(float(1.0).sub(coping));
+    ).mul(float(1.0).sub(isRoof)).mul(float(1.0).sub(parged)).mul(float(1.0).sub(coping));
 
     // Per-brick tint fades out once bricks shrink to a pixel (and soot streaks once they do), so neither can shimmer
     const uFw = fwidth(uCoord);
@@ -814,7 +840,50 @@ function createPreWarBuildingMaterial(opts = {}) {
     const canyonBand = smoothstep(0.0, 14.0, vCoord).mul(float(1.0).sub(smoothstep(22.0, 75.0, vCoord)));
     const canyonGlow = cCanyonBounce.mul(canyonBand.mul(cityUniforms.uCanyonBounce).mul(0.22));
 
-    const wallTint = mix(cStone, backBrick, back);
+    // Faded advertisements on broad party walls. Lettering is evaluated only within the painted panel.
+    const signW = max(min(wallW.sub(3.0), 18.0), 0.1);
+    const signH = max(min(min(min(wallH.mul(0.3), signW.mul(0.42)), 6.5), exposedHeight.sub(1.8)), 0.1);
+    const hasSign = blank.mul(float(1.0).sub(step(0.74, fract(tone.mul(3.7)))))
+      .mul(step(0.8, fract(tone.mul(13.7).add(boxSeed.mul(0.618)))))
+      .mul(step(5.0, signW)).mul(step(2.6, signH));
+    const su = wallS.sub(wallW.sub(signW).mul(0.5)).div(signW);
+    const sv = fromTop.sub(1.2).div(signH);
+    const signFw = vec2(fwidth(su), fwidth(sv));
+    const panel = boxCoverage(su, 0.0, 1.0, signFw.x.mul(0.5)).mul(boxCoverage(sv, 0.0, 1.0, signFw.y.mul(0.5))).mul(hasSign);
+    const signPaint = vec4(0.0).toVar();
+    If(panel.greaterThan(0.001), () => {
+      const pal = fract(tone.mul(29.3));
+      const ground = mix(mix(color(0xd3c9ae), color(0x86392b), step(0.5, pal)), color(0x2b3340), step(0.8, pal));
+      const ink = mix(mix(color(0x6b2a20), color(0xddd2b6), step(0.5, pal)), color(0xd5c086), step(0.8, pal));
+      const border = float(1.0).sub(filteredPulse(su, 0.02, 0.98, signFw.x).mul(filteredPulse(sv, 0.045, 0.955, signFw.y)));
+      const lettering = (v0, v1, line) => {
+        const glyphW = signH.mul((v1 - v0) * 0.64);
+        const n = floor(signW.mul(0.86).div(glyphW));
+        const gx = su.mul(signW).sub(signW.sub(n.mul(glyphW)).mul(0.5)).div(glyphW);
+        const fy = sv.sub(v0).div(v1 - v0);
+        const wx = signFw.x.mul(signW).div(glyphW);
+        const wy = signFw.y.div(v1 - v0);
+        const fx = fract(gx);
+        const h1 = hash2D(vec2(floor(gx).add(line * 31.0), tone.mul(91.0)));
+        const h2 = hash2D(vec2(floor(gx).add(line * 31.0 + 7.0), tone.mul(53.0)));
+        const verticals = max(
+          max(filteredPulse(fx, 0.1, 0.28, wx).mul(step(0.22, h1)), filteredPulse(fx, 0.41, 0.59, wx).mul(step(h1, 0.22))),
+          filteredPulse(fx, 0.72, 0.9, wx).mul(step(0.45, h2))
+        );
+        const bars = max(
+          max(filteredPulse(fy, 0.0, 0.17, wy).mul(step(0.35, fract(h1.mul(7.0)))), filteredPulse(fy, 0.42, 0.58, wy).mul(step(0.5, fract(h2.mul(5.0))))),
+          filteredPulse(fy, 0.83, 1.0, wy).mul(step(0.4, fract(h1.mul(3.0))))
+        ).mul(filteredPulse(fx, 0.1, 0.9, wx));
+        const inText = boxCoverage(gx, 0.0, n, wx.mul(0.5)).mul(boxCoverage(fy, 0.0, 1.0, wy.mul(0.5))).mul(step(0.1, fract(h2.mul(11.0))));
+        return max(verticals, bars).mul(inText);
+      };
+      const letters = max(lettering(0.14, 0.56, 0), lettering(0.66, 0.86, 1));
+      const flake = smoothstep(0.5, 0.74, noise2D(vec2(wallS.mul(0.7), fromTop.mul(1.1)).add(tone.mul(31.0))));
+      const cover = mix(float(0.34), float(0.66), fract(tone.mul(7.7))).mul(float(1.0).sub(flake.mul(0.9))).mul(panel);
+      signPaint.assign(vec4(mix(ground, ink, max(letters, border)), cover));
+    });
+
+    const wallTint = mix(mix(cStone, backTint, back), signPaint.xyz, signPaint.w);
     // Trim stone on the band courses, the storefront fascia and the coping capping every wall
     const trimMix = max(isCornice.mul(0.62).add(isGroundFloor.mul(0.28)), coping.mul(0.8));
     const masonryTint = mix(wallTint, cTrim, trimMix)
@@ -2313,13 +2382,6 @@ function getWaterWaveTexture() {
   return tex;
 }
 
-// Share of the window [x - s, x + s] covered by the interval [a, b]: an exact box filter for bands & points of light
-const waterBoxCover = Fn(([x, a, b, s]) => {
-  const xv = float(x).toVar();
-  const sv = max(float(s), 0.001).toVar();
-  return clamp(min(xv.add(sv), b).sub(max(xv.sub(sv), a)).div(sv.mul(2.0)), 0.0, 1.0);
-});
-
 /**
  * Hudson River, East River, Upper Bay & Central Park Lakes: Physically Based Estuary Water TSL Material
  * - Wave normals (normalNode) from 4 rotated, scaled & drifting samples of the LEAN wave texture whose energy follows
@@ -2520,8 +2582,8 @@ function createWaterMaterial() {
     const r2 = hash2D(vec2(lot, 9.7));
     const r3 = hash2D(vec2(lot, 13.3));
     const lotMix = smoothstep(5.0, 20.0, sU);
-    const upper = mix(waterBoxCover(hRefl, 4.5, S.mul(r1.mul(r1).add(0.3)), sV), waterBoxCover(hRefl, 4.5, S.mul(0.63), sV), lotMix);
-    const ground = waterBoxCover(hRefl, 0.0, 4.5, sV);
+    const upper = mix(boxCoverage(hRefl, 4.5, S.mul(r1.mul(r1).add(0.3)), sV), boxCoverage(hRefl, 4.5, S.mul(0.63), sV), lotMix);
+    const ground = boxCoverage(hRefl, 0.0, 4.5, sV);
 
     // Lit windows (3.2 m bays × 3.6 m floors), resolving to each lot's mean occupancy, then the street's
     const dens = mix(float(0.2), float(0.6), r2);
@@ -2536,8 +2598,8 @@ function createWaterMaterial() {
 
     // Riverside promenade / highway lamps every 30 m, heads at ~8.5 m
     const lampDist = abs(fract(u.div(30.0)).sub(0.5)).mul(30.0);
-    const lampU = mix(waterBoxCover(lampDist, -0.45, 0.45, sU), float(0.9 / 30.0), smoothstep(5.0, 14.0, sU));
-    const lamps = lampU.mul(waterBoxCover(hRefl, 8.2, 8.8, sV)).mul(70.0);
+    const lampU = mix(boxCoverage(lampDist, -0.45, 0.45, sU), float(0.9 / 30.0), smoothstep(5.0, 14.0, sU));
+    const lamps = lampU.mul(boxCoverage(hRefl, 8.2, 8.8, sV)).mul(70.0);
 
     const city = tint.mul(windows.mul(upper).mul(0.95))
       .add(color(0xffcf9a).mul(ground.mul(shopLit).mul(0.4)))

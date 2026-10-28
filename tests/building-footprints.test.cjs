@@ -37,19 +37,21 @@ const THREE = {
     }
   }
 };
+const collision = loadModule(readFileSync(join(__dirname, '../js/building-collision.js'), 'utf8'));
 const { createBuildingFootprints } = loadModule(readFileSync(join(__dirname, '../js/building-footprints.js'), 'utf8'), {
-  imports: { 'three/webgpu': THREE, './tsl-materials.js': { WALL_KINDS: { shop: 0, rear: 2 } } }
+  imports: { 'three/webgpu': THREE, './tsl-materials.js': { WALL_KINDS: { shop: 0, rear: 2, lotLine: 3 } },
+    './building-collision.js': collision }
 });
 const p = (x, z) => ({ x, z });
 const square = (x = 0) => [p(x, 0), p(x + 10, 0), p(x + 10, 10), p(x, 10)];
 const record = (outer, extra = {}) => {
-  const b = { polygons: [{ outer }], height: 60, seed: 123, tone: 0.75, ...extra };
+  const b = { polygons: [{ outer, holes: [] }], height: 60, seed: 123, tone: 0.75, ...extra };
   const points = b.polygons.flatMap(p => p.outer);
   b.cx = (Math.min(...points.map(p => p.x)) + Math.max(...points.map(p => p.x))) / 2;
   b.cz = (Math.min(...points.map(p => p.z)) + Math.max(...points.map(p => p.z))) / 2;
   return b;
 };
-const build = records => { triangulations = []; return createBuildingFootprints({}, records); };
+const build = (records, getNeighbours) => { triangulations = []; return createBuildingFootprints({}, records, getNeighbours); };
 const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-5, `${actual} != ${expected}`);
 
 test('arbitrary wall angles preserve dimensions, outward normals and facade attributes', () => {
@@ -71,7 +73,7 @@ test('arbitrary wall angles preserve dimensions, outward normals and facade attr
     const u0 = attrs.facadeWall.array[i * 3], u1 = attrs.facadeWall.array[(i + 1) * 3];
     assert.ok((b[axis] - a[axis]) * (u1 - u0) > 0, 'window U follows the interior-map tangent');
     for (let j = i; j < i + 4; j++) {
-      [10, 60, 1, 123.7].forEach((v, k) => close(attrs.box.array[j * 4 + k], v));
+      [10, 60, 60, 123.7].forEach((v, k) => close(attrs.box.array[j * 4 + k], v));
       close(attrs.facadeWall.array[j * 3 + 1], j < i + 2 ? 60 : 0);
     }
   }
@@ -121,4 +123,53 @@ test('nearby buildings share a merged batch while distant chunks reuse its pipel
   assert.equal(far.geometry.index.length, 30);
   assert.equal(far.userData.sharesPipelineWith, near);
   assert.ok(near.geometry.bounded && far.geometry.bounded);
+});
+
+const reserve = b => {
+  const points = b.polygons.flatMap(p => p.outer);
+  return { polygons: b.polygons, height: b.height + 0.22,
+    x0: Math.min(...points.map(p => p.x)), x1: Math.max(...points.map(p => p.x)),
+    z0: Math.min(...points.map(p => p.z)), z1: Math.max(...points.map(p => p.z)) };
+};
+const wallKinds = mesh => Array.from({ length: 4 }, (_, i) => mesh.geometry.attributes.facadeWall.array[i * 12 + 2]);
+
+test('adjoining masonry walls are blank above lower roofs without adding triangles', () => {
+  for (const angle of [0, 0.4]) for (const reversed of [false, true]) {
+    const rotate = points => points.map(({ x, z }) => p(x * Math.cos(angle) - z * Math.sin(angle), x * Math.sin(angle) + z * Math.cos(angle)));
+    const outer = rotate(square());
+    if (reversed) outer.reverse();
+    const b = record(outer), neighbour = record(rotate(square(10)), { height: 12 });
+    const mesh = build([b], () => [reserve(b), reserve(neighbour)]).children[0];
+    assert.equal(wallKinds(mesh).filter(k => k === 3).length, 1);
+    assert.equal(wallKinds(mesh).filter(k => k === 0).length, 3);
+    const attrs = mesh.geometry.attributes;
+    for (let i = 0; i < 16; i++) if (attrs.facadeWall.array[i * 3 + 2] === 3) close(attrs.box.array[i * 4 + 2], 48);
+    assert.equal(mesh.geometry.index.length, 30);
+  }
+});
+
+test('partial contacts and architectural props do not remove street-facing windows', () => {
+  const b = record(square());
+  const corner = record([p(10, 0), p(20, 0), p(20, 2), p(10, 2)]);
+  const prop = { ...reserve(record(square(10))), height: 0 };
+  const mesh = build([b], () => [reserve(b), reserve(corner), prop]).children[0];
+  assert.deepEqual(wallKinds(mesh), [0, 0, 0, 0]);
+  assert.deepEqual(wallKinds(build([b]).children[0]), [0, 0, 0, 0], 'materials without party-wall classification keep their facade');
+  const tower = record(square(), { height: 120 });
+  assert.deepEqual(wallKinds(build([tower], () => [reserve(record(square(10)))]).children[0]), [0, 0, 0, 0]);
+});
+
+test('party-wall sign clearance uses the tallest neighbor and leaves courtyard windows', () => {
+  const b = record(square(), { polygons: [{ outer: square(), holes: [[p(3, 3), p(7, 3), p(7, 7), p(3, 7)]] }] });
+  const low = record([p(10, 0), p(20, 0), p(20, 5), p(10, 5)], { height: 12 });
+  const high = record([p(10, 5), p(20, 5), p(20, 10), p(10, 10)], { height: 24 });
+  const court = record([p(3, 3), p(7, 3), p(7, 7), p(3, 7)], { height: 10 });
+  const attrs = build([b], () => [reserve(low), reserve(high), reserve(court)]).children[0].geometry.attributes;
+  let blankVertices = 0;
+  for (let i = 0; i < 16; i++) if (attrs.facadeWall.array[i * 3 + 2] === 3) {
+    close(attrs.box.array[i * 4 + 2], 36);
+    blankVertices++;
+  }
+  assert.equal(blankVertices, 4);
+  for (let i = 16; i < 32; i++) assert.equal(attrs.facadeWall.array[i * 3 + 2], 2);
 });
