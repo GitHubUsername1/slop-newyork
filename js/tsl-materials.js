@@ -1756,8 +1756,9 @@ function createRoadPaintMaterial() {
 }
 
 /**
- * NYC Concrete Sidewalk Flagstones with Filter-Width Anti-Aliased 1.5m Scored Expansion Joints,
- * -12mm `bumpNormal` Groove Relief, Per-Flag Tone Variation & Post-Rain Damp Patches
+ * NYC Concrete Sidewalk Flags: 5 ft squares with filter-width anti-aliased 6 mm tooled joints (rounded `bumpNormal`
+ * grooves, trowelled margins & joint grime), per-flag tone, paler replacement flags, slightly heaved flags, hairline
+ * cracks, flattened chewing gum, weathering stains & Post-Rain Damp Patches
  * that follow cityUniforms.uRoadWetness like the roadway (better drained: fewer, smaller pools)
  * (Ported from SidewalkGenerator.js)
  */
@@ -1767,8 +1768,10 @@ function createSidewalkMaterial() {
     roughness: 0.88
   });
 
-  const cConcreteA = color(0x8e8d85);
-  const cConcreteB = color(0x73726b);
+  const cConcreteA = color(0xa7a197);
+  const cConcreteB = color(0x8e887e);
+  const cGumOld = color(0x77756f);
+  const cGumNew = color(0x34332f);
 
   // Damp patches & pools on the flags, shared by every channel below (own field; drains better than the roadway)
   const swField = noise2D(vec2(positionWorld.x.mul(0.14).add(7.4), positionWorld.z.mul(0.14).sub(13.1))).mul(0.65)
@@ -1778,6 +1781,46 @@ function createSidewalkMaterial() {
   const swFresnel = pow(float(1.0).sub(clamp(normalize(cameraPosition.sub(positionWorld)).y, 0.0, 1.0)), 5.0).mul(0.98).add(0.02);
   const pixelSize = length(fwidth(positionWorld.xz));
 
+  // 5 ft (1.524 m) flags poured in place: the flag, where in it (-0.5 .. 0.5) and how far to its tooled joints (m)
+  const FLAG = 1.524;
+  const wxz = positionWorld.xz;
+  const flagCoord = wxz.div(FLAG);
+  const flagId = floor(flagCoord);
+  const flagHash = hash2D(flagId);
+  const flagLocal = fract(flagCoord).sub(0.5);
+  const edgeDist = float(0.5).sub(max(abs(flagLocal.x), abs(flagLocal.y))).mul(FLAG);
+  // One flag in seven is a newer, paler replacement that hasn't collected the grime & gum of its neighbours yet
+  const replaced = step(0.86, flagHash);
+  // 6 mm tooled joints filled with dirt, the grime that collects either side of them and the smooth trowelled margin the
+  // jointing tool leaves beyond that (filter-width anti-aliased: each settles to its mean once below a pixel)
+  const gridBand = (halfWidth) => max(gridLine(positionWorld.x, FLAG, halfWidth), gridLine(positionWorld.z, FLAG, halfWidth));
+  const joints = gridBand(0.003);
+  const jointGrime = gridBand(0.018);
+  const tooledBand = gridBand(0.045).sub(jointGrime).max(0.0);
+
+  // Flattened chewing gum: a dark fresh blob here and there, grey ghosts of older ones, thickest on busy stretches
+  const gumCell = 0.32;
+  const gumCoord = wxz.div(gumCell);
+  const gumId = floor(gumCoord);
+  const gumCentre = vec2(hash2D(gumId.add(vec2(11.3, 2.9))), hash2D(gumId.add(vec2(23.9, 17.4)))).mul(0.6).add(0.2);
+  const gumRadius = hash2D(gumId.add(vec2(4.1, 31.7))).mul(0.011).add(0.006);
+  const gumWobble = noise2D(gumCoord.mul(9.0)).sub(0.5).mul(0.35).add(1.0);
+  const gumDist = length(fract(gumCoord).sub(gumCentre)).mul(gumCell).mul(gumWobble);
+  const gumDensity = smoothstep(0.3, 0.8, noise2D(wxz.mul(0.07).add(5.3))).mul(0.4).add(0.12).mul(float(1.0).sub(replaced.mul(0.8)));
+  const gumAA = max(pixelSize, 0.001);
+  const gum = smoothstep(gumRadius.add(gumAA), gumRadius.sub(gumAA.mul(0.5)), gumDist)
+    .mul(step(float(1.0).sub(gumDensity), hash2D(gumId.add(vec2(7.7, 3.3)))))
+    .mul(smoothstep(0.04, 0.015, pixelSize));
+  const gumAge = hash2D(gumId.add(vec2(19.1, 0.7)));
+
+  // Hairline settlement cracks across about one flag in eight, wandering a little
+  const crackAngle = hash2D(flagId.add(vec2(5.5, 1.3))).mul(Math.PI);
+  const crackOffset = hash2D(flagId.add(vec2(8.8, 6.2))).sub(0.5).mul(0.6);
+  const crackWander = noise2D(wxz.mul(7.0)).sub(0.5).mul(0.02).add(noise2D(wxz.mul(1.7).add(3.7)).sub(0.5).mul(0.07));
+  const crackDist = dot(flagLocal, vec2(cos(crackAngle), sin(crackAngle))).sub(crackOffset).mul(FLAG).add(crackWander);
+  const hasCrack = step(0.875, hash2D(flagId.add(vec2(41.7, 9.2)))).mul(float(1.0).sub(replaced));
+  const crack = lineAA(crackDist, 0.0012).mul(hasCrack).mul(smoothstep(0.004, 0.02, edgeDist));
+
   mat.aoNode = canyonSkyAONode();
 
   mat.colorNode = Fn(() => {
@@ -1786,43 +1829,61 @@ function createSidewalkMaterial() {
     const camDist = length(positionWorld.sub(cameraPosition));
     const detail = smoothstep(190.0, 16.0, camDist);
 
-    const panel = 1.5; // 5 ft NYC concrete sidewalk flags
-    const panelHash = hash2D(floor(vec2(wx.div(panel), wz.div(panel))));
+    // Pour-to-pour tone, broad traffic-worn & weathered stains, and fine exposed aggregate
     const tone = noise2D(vec2(wx.mul(0.48), wz.mul(0.48)));
-    const grit = noise2D(vec2(wx.mul(14.0), wz.mul(14.0))).sub(0.5).mul(0.08).mul(detail).mul(smoothstep(0.07, 0.02, pixelSize));
+    const stainField = noise2D(vec2(wx.mul(0.8), wz.mul(0.8)).add(17.0)).mul(0.65).add(noise2D(vec2(wx.mul(2.6), wz.mul(2.6))).mul(0.35));
+    const stain = smoothstep(0.52, 0.86, stainField).mul(mix(float(0.24), float(0.08), replaced));
+    const grit = noise2D(vec2(wx.mul(14.0), wz.mul(14.0))).sub(0.5).mul(0.07).mul(detail).mul(smoothstep(0.07, 0.02, pixelSize));
+    // Cloudy trowel & curing mottling a hand or two across
+    const mottle = noise2D(vec2(wx.mul(3.1), wz.mul(3.1)).add(41.0)).mul(0.6).add(noise2D(vec2(wx.mul(7.3), wz.mul(7.3))).mul(0.4))
+      .sub(0.5).mul(0.12).mul(smoothstep(0.15, 0.05, pixelSize));
+    const aggregate = noise2D(vec2(wx.mul(55.0), wz.mul(55.0))).sub(0.5).mul(0.08).mul(smoothstep(0.02, 0.006, pixelSize));
 
-    // Filter-width anti-aliased 1.5m scored joints
-    const joints = max(gridLine(wx, panel, 0.042), gridLine(wz, panel, 0.042)).mul(detail);
+    const flagTone = flagHash.sub(0.5).mul(0.2).add(1.0).mul(mix(float(1.0), float(1.1), replaced));
+    const concrete = mix(cConcreteB, cConcreteA, tone)
+      .mul(flagTone)
+      .mul(float(1.0).sub(stain))
+      .mul(mottle.add(1.0))
+      .add(grit.add(aggregate).mul(0.6))
+      .mul(tooledBand.mul(0.06).add(1.0))
+      .mul(float(1.0).sub(jointGrime.mul(0.18)));
+
+    const withGum = mix(concrete, mix(cGumNew, cGumOld, gumAge), gum.mul(mix(float(0.9), float(0.45), gumAge)));
+    const withJoints = withGum.mul(float(1.0).sub(joints.mul(0.55).mul(detail))).mul(float(1.0).sub(crack.mul(0.45)));
 
     // Post-rain damp patches, pools & the overall wet film darken the flags
-    const baseConcrete = mix(cConcreteB, cConcreteA, tone)
-      .mul(panelHash.sub(0.5).mul(0.16).add(1.0))
-      .add(grit)
+    return withJoints
       .mul(mix(float(1.0), float(0.72), max(swWet.x, swPuddle)))
       .mul(mix(float(1.0), float(0.8), swWet.z));
-
-    return baseConcrete.mul(float(1.0).sub(joints.mul(0.45)));
   })();
 
   mat.roughnessNode = Fn(() => {
-    const panelHash = hash2D(floor(vec2(positionWorld.x.div(1.5), positionWorld.z.div(1.5))));
-    const wetRough = mix(float(0.90).sub(panelHash.mul(0.06)), float(0.55), max(swWet.z, swWet.x.mul(0.7)));
+    const dry = float(0.9).sub(flagHash.mul(0.06)).sub(tooledBand.mul(0.1)).sub(gum.mul(0.25));
+    const wetRough = mix(dry, float(0.55), max(swWet.z, swWet.x.mul(0.7)));
     return mix(wetRough, float(0.2), swPuddle);
   })();
 
   // Water's Fresnel (F0 = 0.02) on pools & the wet film, as for the roadway
   mat.metalnessNode = clamp(swFresnel.mul(1.6), 0.0, 0.85).mul(max(swPuddle, swWet.z.mul(0.3)));
 
-  // Physical -12mm scored expansion joints + +3mm concrete aggregate grain via bumpNormal
+  // 6 mm tooled joint grooves with rounded edges, flags heaved a little out of true by tree roots & frost, hairline
+  // cracks, gum blobs and concrete grain via bumpNormal. Edges ramp over >= 2 px so nothing sparkles along the joints.
   mat.normalNode = Fn(() => {
     const wx = positionWorld.x;
     const wz = positionWorld.z;
     const camDist = length(positionWorld.sub(cameraPosition));
     const detail = smoothstep(140.0, 14.0, camDist);
+    const rampPx = pixelSize.mul(2.0);
 
-    const joints = max(gridLine(wx, 1.5, 0.042), gridLine(wz, 1.5, 0.042));
+    const groove = float(1.0).sub(smoothstep(0.003, max(float(0.012), rampPx), edgeDist)).mul(0.006).mul(smoothstep(0.02, 0.006, pixelSize));
+    const tiltAngle = hash2D(flagId.add(vec2(2.3, 13.1))).mul(Math.PI * 2.0);
+    const tiltSlope = hash2D(flagId.add(vec2(29.3, 3.7))).mul(0.012).mul(float(1.0).sub(replaced));
+    const tilt = dot(flagLocal, vec2(cos(tiltAngle), sin(tiltAngle))).mul(FLAG).mul(tiltSlope)
+      .mul(smoothstep(0.0, max(float(0.06), pixelSize.mul(3.0)), edgeDist));
     const grain = noise2D(vec2(wx.mul(4.5), wz.mul(4.5))).sub(0.5).mul(0.003);
-    const height = grain.sub(joints.mul(0.012)).mul(detail).mul(float(1.0).sub(swPuddle));
+    const pores = noise2D(vec2(wx.mul(38.0), wz.mul(38.0))).sub(0.5).mul(0.0008).mul(smoothstep(0.012, 0.004, pixelSize));
+    const height = grain.add(pores).add(tilt).sub(groove).sub(crack.mul(0.0015)).add(gum.mul(0.0008))
+      .mul(detail).mul(float(1.0).sub(swPuddle));
     return bumpNormal(height);
   })();
 
@@ -1852,7 +1913,7 @@ function createCurbMaterial() {
     const speckle = noise2D(vec2(wx.mul(18.0), wz.mul(18.0))).sub(0.5).mul(0.06).mul(detail);
     const stone = mix(color(0x4c4c45), color(0x63635a), tone).add(speckle);
 
-    const joints = max(gridLine(wx, 1.5, 0.038), gridLine(wz, 1.5, 0.038)).mul(detail);
+    const joints = max(gridLine(wx, 1.5, 0.005), gridLine(wz, 1.5, 0.005)).mul(detail);
     const topFace = smoothstep(0.5, 0.85, normalWorldGeometry.y);
     const wetFilm = smoothstep(0.2, 0.8, cityUniforms.uRoadWetness); // rain-darkened granite, like the roadway's film
     return mix(stone.mul(0.68), stone, topFace).mul(float(1.0).sub(joints.mul(0.42))).mul(mix(float(1.0), float(0.78), wetFilm));
