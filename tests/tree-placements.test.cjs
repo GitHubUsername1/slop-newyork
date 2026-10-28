@@ -48,6 +48,28 @@ test('pits follow angled curbs and remain wholly on the same sidewalk', () => {
   assert.equal(place([-0.1, -0.1], [], clear).length, 0, 'corner pits must not cross either curb');
 });
 
+test('narrow pits keep their full length when checking corner clearance', () => {
+  for (const angle of [0, 0.35]) {
+    const cs = Math.cos(angle), sn = Math.sin(angle);
+    const block = rectangle(0, 0, 40, 80, angle);
+    const opposite = rectangle(30 * sn, -30 * cs, 40, 20, angle);
+    const place = setup([block, opposite]);
+    const point = (x, z) => [x * cs - z * sn, x * sn + z * cs];
+    assert.equal(place(point(1.1, 0.9), [], clear).length, 0, 'full pit length crosses the corner');
+
+    const [site] = place(point(6, 0.9), [], clear);
+    assert.ok(site);
+    assert.equal(site.pitS, 0.7);
+    const yawCos = Math.cos(site.pitRot), yawSin = Math.sin(site.pitRot);
+    // Match the rendered pit: scale local X, then rotate around Y.
+    for (const u of [-0.85, 0.85]) for (const v of [-1.3, 1.3]) {
+      const localX = u * site.pitS;
+      assert.ok(contains(block, site.x + localX * yawCos + v * yawSin,
+        site.z - localX * yawSin + v * yawCos));
+    }
+  }
+});
+
 test('road, courtyard, park and median coordinates are excluded', () => {
   const blocks = [rectangle(0, 0, 40, 80), rectangle(50, 0, 40, 80, 0, { park: 1 }),
     rectangle(100, 0, 4, 80, 0, { median: true })];

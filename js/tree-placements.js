@@ -67,8 +67,8 @@ function placeStreetTrees(points, existingSites, isClear) {
     const pitS = narrow ? 0.7 : 1;
     let fits = true;
     for (const across of [-0.85, 0.85]) for (const along of [-1.3, 1.3]) {
-      if (blockAt(x + (across * nx + along * edge.dx) * pitS,
-        z + (across * nz + along * edge.dz) * pitS) !== edge.block) fits = false;
+      if (blockAt(x + across * pitS * nx + along * edge.dx,
+        z + across * pitS * nz + along * edge.dz) !== edge.block) fits = false;
     }
     if (!fits) continue;
 
