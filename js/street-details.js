@@ -16,9 +16,11 @@ import {
 } from './city-config.js';
 import { cityUniforms, createSteamMaterial, createTreeGrateMaterial, createGodRayMaterial } from './tsl-materials.js';
 import { createTreeField } from './trees.js';
+import { REAL_TREES } from './tree-geodata.js';
+import { placeStreetTrees } from './tree-placements.js';
 import { createSubwayEntranceParts, createFoodCartParts } from './street-props.js';
 import { createSubwayEntrances } from './subway-entrances.js';
-import { pavedPlazaRects, centralParkClearings, parkTreeSites, sidewalkBlocks, parkLampSites } from './city-grid.js';
+import { pavedPlazaRects, centralParkClearings, parkTreeSites, parkLampSites } from './city-grid.js';
 import { bryantParkLawn } from './landmarks.js';
 
 // Instanced street furniture, traffic signals, trees and nearby light pools.
@@ -920,72 +922,10 @@ function buildStreetDetails(scene, colliders = []) {
   // B5. The squares, the other parks & the plazas (sites laid out by city-grid.js)
   for (const s of parkTreeSites || []) treePositions.push(s);
 
-  // C & D. Street trees on the raised sidewalks of every real block (city-config.js BLOCKS via the slabs city-grid.js
-  //        laid): along the avenue fronts (w / e edges) and, in the residential neighbourhoods, both curbs of the side
-  //        streets (n / s edges) — honey locusts on the narrow streets, planes, locusts & elms on the wider ones, with
-  //        random missing trees & the odd unplanted block. Never in plazas or parks.
-  let sidewalkTreePositions = [];
-  const SIDEWALK_Y = 0.22;
-  const swBlocks = sidewalkBlocks || [];
-  const onSidewalk = (x, z) => {
-    const b = blockAt(x, z);
-    return !!b && !(b.park > 0.6) && !b.median;
-  };
-  // Street trees turn in 90° steps with the crown squeezed across the sidewalk, away from the facades
-  function addStreetTree(x, z, scale, species, acrossX, extra = {}) {
-    if (!onSidewalk(x, z) || inPlaza(x, z, 1.5) || !isClearOfPoles(x, z, 2.2)) return;
-    const q = Math.floor(hashPos(x, 8.8, z) * 3.999);
-    const t = { x, y: SIDEWALK_Y, z, scale, species, yaw: q * Math.PI * 0.5, tier: acrossX ? 1 : 2, ...extra };
-    if (acrossX === (q % 2 === 0)) t.sx = extra.squeeze || 0.82;
-    else t.sz = extra.squeeze || 0.82;
-    treePositions.push(t);
-    sidewalkTreePositions.push(t);
-  }
-  const RESIDENTIAL = new Set(['uws', 'ues', 'harlem', 'morningside', 'east_harlem', 'chelsea', 'west_chelsea', 'gramercy', 'murray_hill',
-    'west_village', 'village', 'east_village', 'lower_east_side', 'turtle_bay', 'hells_kitchen', 'stuy_town', 'tribeca', 'battery_park_city',
-    'little_italy', 'chinatown', 'soho', 'hudson_square']);
-  const COMMERCIAL = new Set(['midtown', 'billionaires_row', 'garment', 'fidi', 'civic_center', 'hudson_yards', 'flatiron', 'nomad']);
-  const AVE_SP = 17;
-  const CROSS_SP = 14;
-  for (const s of swBlocks) {
-    const b = s.block;
-    if (!b || b.median || b.park > 0.6) continue;
-    const res = RESIDENTIAL.has(b.district);
-    const x0 = s.cx - s.w * 0.5;
-    const x1 = s.cx + s.w * 0.5;
-    const z0 = s.cz - s.d * 0.5;
-    const z1 = s.cz + s.d * 0.5;
-    // C. avenue fronts (the slab's short w / e edges on a grid block)
-    if (s.d >= 20) {
-      const thin = COMMERCIAL.has(b.district) ? 0.55 : 0.3;
-      for (const [x, side] of [[x0 + 1.3, -1], [x1 - 1.3, 1]]) {
-        const n = Math.floor((s.d - 10) / AVE_SP) + 1;
-        const zs = z0 + (s.d - (n - 1) * AVE_SP) * 0.5;
-        for (let i = 0; i < n; i++) {
-          const tz = zs + i * AVE_SP;
-          if (hashPos(x, 3.1, tz) < thin) continue;
-          addStreetTree(x, tz, 0.66 + hashPos(tz, 3.1, x) * 0.14, mixSpecies(hashPos(x, side, tz), 0.4, 0.35), true);
-        }
-      }
-    }
-    // D. side-street curbs (residential neighbourhoods)
-    if (!res || s.w < 24 || hashPos(s.cx, 4.2, s.cz) < 0.22) continue;
-    for (const side of [-1, 1]) {
-      const edge = side < 0 ? z0 : z1;
-      const narrow = !!blockAt(s.cx, edge + side * 14); // a block across within ~14 m: a narrow side street
-      const z = edge - side * (narrow ? 0.9 : 1.25);
-      const n = Math.floor((s.w - 7) / CROSS_SP) + 1;
-      const xs = s.cx - ((n - 1) * CROSS_SP) * 0.5;
-      for (let i = 0; i < n; i++) {
-        const x = xs + i * CROSS_SP + (hashPos(i, s.cz, side) - 0.5) * 1.6;
-        const r = hashPos(x, 6.1, z);
-        if (r < 0.32) continue;
-        const species = narrow ? 1 : mixSpecies(hashPos(z, 2.9, x), 0.4, 0.35);
-        const scale = narrow ? 0.54 + r * 0.1 : 0.6 + r * 0.24;
-        addStreetTree(x, z, scale, species, false, { pitRot: Math.PI / 2, grate: false, pitS: narrow ? 0.7 : 1, squeeze: narrow ? 0.7 : 0.82 });
-      }
-    }
-  }
+  // Surveyed street trees; parks keep their authored terrain, clearings and tree layouts.
+  let sidewalkTreePositions = placeStreetTrees(REAL_TREES, treePositions,
+    (x, z) => !inPlaza(x, z, 1.5) && isClearOfPoles(x, z, 2.2));
+  for (const tree of sidewalkTreePositions) treePositions.push(tree);
   const treeField = createTreeField(scene, treePositions, [...colliders, ...subwayColliders]);
   group.add(treeField.group);
   sidewalkTreePositions = sidewalkTreePositions.filter((t) => treeField.sites.has(t));
