@@ -191,10 +191,6 @@ class TiledLayer {
     if (pts && pts.length > 1) addLine(this.pathFor(boundsOf(pts)), pts);
   }
 
-  rect(x0, z0, x1, z1) {
-    this.pathFor({ minX: x0, maxX: x1, minZ: z0, maxZ: z1 }).rect(x0, z0, x1 - x0, z1 - z0);
-  }
-
   /** Calls fn(path) for every tile overlapping the view */
   each(v, fn) {
     for (const t of this.tiles.values()) {
@@ -284,8 +280,7 @@ function footprintLayers(all) {
   for (const blk of all) {
     for (const f of blk.footprints || []) {
       const layer = tones[f.h > 95 ? 2 : f.h > 45 ? 1 : 0];
-      if (f.pts) layer.ring(f.pts, f.holes);
-      else layer.rect(f.x0, f.z0, f.x1, f.z1);
+      layer.ring(f.pts, f.holes);
     }
   }
   FOOTPRINTS = { src: all, n: all.length, tones, version: FOOTPRINTS ? FOOTPRINTS.version + 1 : 1 };

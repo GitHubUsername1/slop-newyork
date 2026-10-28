@@ -356,7 +356,7 @@ function buildCityBlocks(scene, landmarkColliders = []) {
       const xs = polygon.outer.map((p) => p.x), zs = polygon.outer.map((p) => p.z);
       const minX = Math.min(...xs), maxX = Math.max(...xs), minZ = Math.min(...zs), maxZ = Math.max(...zs);
       colliders.push({ minX, maxX, minZ, maxZ, minY: 0, maxY: top, polygon });
-      detail.footprints.push({ x0: minX, x1: maxX, z0: minZ, z1: maxZ, h: top, tone, pts: polygon.outer, holes: polygon.holes });
+      detail.footprints.push({ h: top, pts: polygon.outer, holes: polygon.holes });
     }
     const neighbours = nearbyReserves({ minX: b.minX - 6, maxX: b.maxX + 6, minZ: b.minZ - 6, maxZ: b.maxZ + 6 });
     addSurveyedFireEscapes(b, detail, storeys[mat], neighbours);
