@@ -13,6 +13,7 @@ import {
   buildCarGeometry,
   buildCarSidePatch,
   buildSteerableWheelGeo,
+  carTipZ,
   createLoftedCarMaterial,
   buildHelicopterBodyGeometry,
   buildHelicopterMainRotorGeometry,
@@ -157,6 +158,8 @@ function createTaxiDoorDecalTexture() {
   ctx.fillText('$3.00 INITIAL FARE', 112, 90);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
+  // The decals are mostly seen at grazing angles from the chase camera
+  tex.anisotropy = 16;
   return tex;
 }
 
@@ -180,6 +183,7 @@ function createNYLicensePlateTexture() {
   ctx.fillText('NYC T&LC', 128, 114);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 16;
   return tex;
 }
 
@@ -504,16 +508,16 @@ class ThirdPersonControllerManager {
       chassisPivot.add(decal);
     }
 
-    // 3. High-Detail NY Empire Gold License Plates on the bumpers
+    // 3. High-Detail NY Empire Gold License Plates on the raked bumpers, tilted to follow the fascias
     const nyPlateTex = createNYLicensePlateTexture();
     const nyPlateMat = new THREE.MeshStandardNodeMaterial({ map: nyPlateTex, roughness: 0.28 });
-    const rearPlate = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.14, 0.02), nyPlateMat);
-    rearPlate.position.set(0, spec.plates[1], spec.zRear - 0.006);
-    chassisPivot.add(rearPlate);
-
-    const frontPlate = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.14, 0.02), nyPlateMat);
-    frontPlate.position.set(0, spec.plates[0], spec.zFront + 0.006);
-    chassisPivot.add(frontPlate);
+    for (const front of [true, false]) {
+      const y = spec.plates[front ? 0 : 1];
+      const plate = new THREE.Mesh(new THREE.BoxGeometry(0.32, 0.14, 0.008), nyPlateMat);
+      plate.position.set(0, y, carTipZ(spec, y, front) + (front ? 0.003 : -0.003));
+      plate.rotation.x = Math.atan((carTipZ(spec, y + 0.07, front) - carTipZ(spec, y - 0.07, front)) / 0.14);
+      chassisPivot.add(plate);
+    }
 
     // 3b. Brake, reverse & turn lights are lit by the taxi material from its carState uniform (see updateCar)
     const carState = taxiLoftMat.userData.carState;

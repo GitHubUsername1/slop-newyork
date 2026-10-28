@@ -2,11 +2,20 @@ import * as THREE from 'three/webgpu';
 import { cityUniforms } from './tsl-materials.js';
 import {
   Fn,
+  If,
   float,
   vec2,
+  vec3,
+  vec4,
   color,
   attribute,
+  varying,
+  vertexStage,
   sin,
+  cos,
+  atan,
+  pow,
+  dot,
   abs,
   fract,
   floor,
@@ -18,6 +27,8 @@ import {
   smoothstep,
   length,
   fwidth,
+  normalView,
+  positionViewDirection,
   uniform,
   texture,
   time,
@@ -213,45 +224,48 @@ const CAR_PARTS = {
 const BODY_SPECS = {
   sedan: {
     name: 'sedan',
-    zFront: 2.25,
-    zRear: -2.25,
+    zFront: 2.22,
+    zRear: -2.28,
     wheelRadius: 0.35,
-    wheelZ: 1.38,
-    wheelX: 0.83,
-    archGap: 0.065, // wheel arch radius = wheelRadius + archGap
-    archFlare: 0.02, // extra half-width over the wheels
-    tuck: 0.075, // sill tucked in from the widest point
-    halfWidth: [[2.25, 0.91], [1.38, 0.922], [0, 0.928], [-1.38, 0.926], [-2.25, 0.915]],
-    sill: [[2.25, 0.29], [1.2, 0.265], [-1.2, 0.265], [-2.25, 0.3]],
-    shoulder: [[2.25, 0.66], [0, 0.7], [-2.25, 0.76]],
-    edge: [[2.1, 0.79], [1.5, 0.85], [0.85, 0.935], [0.55, 0.955], [-1.0, 0.985], [-1.62, 0.975], [-2.1, 0.91]],
-    crown: [[2.1, 0.035], [0.95, 0.03], [0.66, 0.004], [-1.56, 0.004], [-1.78, 0.016], [-2.25, 0.012]],
-    tumble: [[2.25, 0.11], [0.9, 0.09], [-1.6, 0.085], [-2.25, 0.105]],
-    nose: { halfWidth: [0.3, 0.7, 3], edge: [0.12, 0.77, 3], crown: [0.12, 0.01, 2], sill: [0.13, 0.33, 2], shoulder: [0.2, 0.59, 2.4] },
-    tail: { halfWidth: [0.3, 0.72, 2.6], edge: [0.11, 0.905, 3], crown: [0.11, 0.008, 2], sill: [0.14, 0.35, 2], shoulder: [0.2, 0.69, 2.4] },
+    wheelZ: 1.4,
+    wheelX: 0.8,
+    archGap: 0.036, // wheel arch radius = wheelRadius + archGap
+    archFlare: 0.022, // extra half-width over the wheels
+    tuck: 0.07, // sill tucked in from the widest point
+    halfWidth: [[2.22, 0.9], [1.4, 0.918], [0, 0.926], [-1.4, 0.922], [-2.28, 0.908]],
+    sill: [[2.22, 0.265], [1.2, 0.245], [-1.2, 0.245], [-2.28, 0.285]],
+    shoulder: [[2.22, 0.68], [1.75, 0.76], [1.4, 0.772], [0, 0.782], [-1.4, 0.795], [-2.28, 0.77]],
+    edge: [[2.08, 0.81], [1.55, 0.865], [0.82, 0.948], [0.3, 0.97], [-0.4, 0.985], [-1.2, 1.0], [-1.58, 0.995], [-1.88, 0.968], [-2.12, 0.94]],
+    crown: [[2.1, 0.04], [0.95, 0.035], [0.68, 0.004], [-1.66, 0.004], [-1.92, 0.018], [-2.28, 0.014]],
+    tumble: [[2.22, 0.12], [0.9, 0.1], [-1.6, 0.1], [-2.28, 0.115]],
+    nose: { halfWidth: [0.32, 0.68, 2.8], edge: [0.14, 0.74, 2.6], crown: [0.14, 0.012, 2], sill: [0.16, 0.31, 2], shoulder: [0.22, 0.62, 2.6] },
+    tail: { halfWidth: [0.3, 0.72, 2.8], edge: [0.1, 0.91, 3], crown: [0.1, 0.008, 2], sill: [0.16, 0.36, 2], shoulder: [0.22, 0.7, 2.6] },
+    noseRake: { length: 0.55, y: [[0.25, 0.045], [0.36, 0], [0.54, 0], [0.68, 0.03], [0.78, 0.1], [0.86, 0.14]], plan: 0.085 },
+    tailRake: { length: 0.42, y: [[0.27, 0.075], [0.44, 0], [0.56, 0], [0.62, 0.012], [0.76, 0.015], [0.94, 0.03]], plan: 0.065 },
     cabin: {
-      cowl: 0.86,
-      roofFront: 0.0,
-      roofRear: -1.0,
-      deck: -1.68,
-      roofY: [[0.0, 1.435], [-0.5, 1.455], [-1.0, 1.42]],
-      rail: [0.645, 0.625], // roof rail half-width at the front & rear of the roof
-      inset: 0.035, // side glass base inset from the body's top edge
-      bulge: 0.012, // side glass outward curvature
+      cowl: 0.82,
+      roofFront: -0.02,
+      roofRear: -1.12,
+      deck: -1.86,
+      roofY: [[-0.02, 1.41], [-0.55, 1.445], [-1.12, 1.405]],
+      rail: [0.62, 0.595], // roof rail half-width at the front & rear of the roof
+      inset: 0.03, // side glass base inset from the body's top edge
+      bulge: 0.014, // side glass outward curvature
       roofEdge: 0.05, // roof rail rounding height
       roofCrown: 0.035,
       roofRound: 4,
-      pillars: [-0.3] // B (and C) pillar centres
+      pillars: [-0.36], // B (and C) pillar centres
+      glassEnd: -1.56 // where the side glass ends on the belt, ahead of the deck: the C-pillar's base
     },
-    doors: [0.84, -0.3, -1.02], // door shut lines
-    handles: [-0.13, -0.86],
-    headlight: [0.59, 0.69, 0.23, 0.055], // centre |x|, y, half-width, half-height
-    taillight: [0.575, 0.795, 0.255, 0.064],
-    grille: [0.68, 0.31, 0.06], // upper grille between the headlights: y, half-width, half-height
-    intake: [0.37, 0.46, 0.045], // lower grille
-    plates: [0.555, 0.68], // front / rear plate centre heights
-    bumperLine: [0.775, 0.565], // hood / bumper and trunk / bumper shut lines on the nose & tail
-    bumpers: [[0.46, 0.03], [0.49, 0.035]], // front / rear trim: centre height, half-height
+    doors: [0.79, -0.36, -0.98], // door shut lines
+    handles: [-0.2, -0.86],
+    headlight: [0.6, 0.68, 0.24, 0.048], // centre |x|, y, half-width, half-height
+    taillight: [0.6, 0.815, 0.265, 0.052],
+    grille: [0.66, 0.3, 0.042], // upper grille between the headlights: y, half-width, half-height
+    intake: [0.4, 0.55, 0.072], // lower grille
+    plates: [0.46, 0.665], // front / rear plate centre heights
+    bumperLine: [0.75, 0.555], // hood / bumper and trunk / bumper shut lines on the nose & tail
+    bumpers: [[0.44, 0.03], [0.48, 0.03]], // front / rear bumper reference lines: centre height, half-height
     chrome: true, // chrome strip along the side windows' sills
     cladding: 0, // height of the unpainted lower body cladding (SUVs)
     sign: false,
@@ -260,53 +274,233 @@ const BODY_SPECS = {
   },
   suv: {
     name: 'suv',
-    zFront: 2.3,
-    zRear: -2.3,
-    wheelRadius: 0.39,
-    wheelZ: 1.4,
-    wheelX: 0.87,
-    archGap: 0.075,
-    archFlare: 0.03,
-    tuck: 0.07,
-    halfWidth: [[2.3, 0.948], [1.4, 0.96], [0, 0.966], [-1.4, 0.964], [-2.3, 0.956]],
-    sill: [[2.3, 0.39], [1.2, 0.35], [-1.2, 0.35], [-2.3, 0.41]],
-    shoulder: [[2.3, 0.8], [0, 0.84], [-2.3, 0.88]],
-    edge: [[2.1, 0.99], [1.5, 1.045], [0.85, 1.1], [0.6, 1.12], [-1.0, 1.145], [-2.0, 1.175], [-2.3, 1.18]],
-    crown: [[2.1, 0.035], [0.9, 0.03], [0.6, 0.004], [-2.3, 0.004]],
-    tumble: [[2.3, 0.1], [0.9, 0.08], [-2.3, 0.08]],
-    nose: { halfWidth: [0.27, 0.76, 3], edge: [0.13, 0.96, 3], crown: [0.13, 0.01, 2], sill: [0.12, 0.42, 2], shoulder: [0.2, 0.74, 2.4] },
-    tail: { halfWidth: [0.24, 0.8, 2.6], edge: [0.08, 1.13, 3], crown: [0.08, 0, 2], sill: [0.14, 0.44, 2], shoulder: [0.18, 0.84, 2.4] },
+    zFront: 2.32,
+    zRear: -2.35,
+    wheelRadius: 0.38,
+    wheelZ: 1.45,
+    wheelX: 0.845,
+    archGap: 0.05,
+    archFlare: 0.032,
+    tuck: 0.065,
+    halfWidth: [[2.32, 0.935], [1.45, 0.964], [0, 0.97], [-1.45, 0.966], [-2.35, 0.945]],
+    sill: [[2.32, 0.38], [1.2, 0.335], [-1.2, 0.335], [-2.35, 0.415]],
+    shoulder: [[2.32, 0.81], [1.75, 0.885], [1.45, 0.9], [0, 0.925], [-1.45, 0.955], [-2.35, 0.94]],
+    edge: [[2.16, 0.985], [1.65, 1.068], [1.1, 1.098], [0.82, 1.105], [0, 1.125], [-0.95, 1.15], [-1.55, 1.185], [-1.9, 1.2], [-2.2, 1.195], [-2.35, 1.17]],
+    crown: [[2.16, 0.048], [0.95, 0.042], [0.68, 0.004], [-2.35, 0.004]],
+    tumble: [[2.32, 0.125], [0.9, 0.105], [-1.6, 0.11], [-2.35, 0.125]],
+    nose: { halfWidth: [0.34, 0.72, 2.8], edge: [0.14, 0.91, 2.6], crown: [0.14, 0.015, 2], sill: [0.16, 0.43, 2], shoulder: [0.22, 0.7, 2.6] },
+    tail: { halfWidth: [0.28, 0.76, 2.8], edge: [0.06, 1.15, 3], crown: [0.06, 0.004, 2], sill: [0.16, 0.46, 2], shoulder: [0.2, 0.86, 2.6] },
+    noseRake: { length: 0.62, y: [[0.35, 0.085], [0.5, 0], [0.76, 0.012], [0.92, 0.075], [1.04, 0.145]], plan: 0.075 },
+    tailRake: { length: 0.42, y: [[0.38, 0.085], [0.54, 0], [0.66, 0], [0.76, 0.02], [1.02, 0.028], [1.19, 0.035]], plan: 0.045 },
     cabin: {
-      cowl: 0.8,
-      roofFront: 0.08,
-      roofRear: -1.96,
+      cowl: 0.82,
+      roofFront: -0.22,
+      roofRear: -1.7,
       deck: -2.2,
-      roofY: [[0.08, 1.735], [-0.9, 1.76], [-1.96, 1.745]],
-      rail: [0.71, 0.7],
+      roofY: [[-0.22, 1.71], [-0.85, 1.735], [-1.7, 1.67]],
+      rail: [0.665, 0.635],
       inset: 0.035,
-      bulge: 0.012,
+      bulge: 0.014,
       roofEdge: 0.055,
-      roofCrown: 0.03,
+      roofCrown: 0.032,
       roofRound: 4,
-      pillars: [-0.3, -1.18]
+      pillars: [-0.38, -1.2],
+      glassEnd: -1.9
     },
-    doors: [0.78, -0.3, -1.18],
-    handles: [-0.13, -1.0],
-    headlight: [0.64, 0.86, 0.235, 0.065],
-    taillight: [0.745, 0.985, 0.105, 0.13],
-    grille: [0.83, 0.36, 0.095],
-    intake: [0.465, 0.44, 0.04],
-    plates: [0.66, 0.82],
-    bumperLine: [0.965, 0.655],
-    bumpers: [[0.56, 0.04], [0.56, 0.04]],
+    doors: [0.78, -0.38, -1.04],
+    handles: [-0.2, -0.92],
+    headlight: [0.63, 0.875, 0.245, 0.05],
+    taillight: [0.65, 0.98, 0.25, 0.058],
+    grille: [0.835, 0.375, 0.105],
+    intake: [0.49, 0.48, 0.058],
+    plates: [0.58, 0.82],
+    bumperLine: [0.94, 0.66],
+    bumpers: [[0.54, 0.04], [0.56, 0.04]],
     chrome: false,
-    cladding: 0.5,
+    cladding: 0.46,
     sign: false,
     rails: true,
     rearWiper: true
   }
 };
 BODY_SPECS.taxi = Object.assign({}, BODY_SPECS.sedan, { name: 'taxi', sign: true });
+BODY_SPECS.pickup = {
+  name: 'pickup',
+  zFront: 2.74,
+  zRear: -2.94,
+  wheelRadius: 0.435,
+  wheelZ: 1.92,
+  wheelX: 0.91,
+  archGap: 0.058,
+  archPower: 3.2,
+  archFlare: 0.042,
+  tuck: 0.065,
+  upperRound: 4.6,
+  stationStep: 0.46,
+  proxyStep: 1.3,
+  halfWidth: [[2.74, 0.99], [1.92, 1.02], [0, 1.025], [-1.92, 1.02], [-2.94, 1.0]],
+  sill: [[2.74, 0.51], [1.4, 0.48], [-1.4, 0.48], [-2.94, 0.52]],
+  shoulder: [[2.74, 1.12], [2.15, 1.18], [1.92, 1.19], [0, 1.195], [-1.92, 1.195], [-2.94, 1.18]],
+  edge: [[2.62, 1.25], [2.15, 1.29], [1.4, 1.305], [1.14, 1.31], [0.1, 1.31], [-0.96, 1.315], [-1.92, 1.315], [-2.82, 1.305]],
+  crown: [[2.62, 0.042], [1.35, 0.038], [1.02, 0.005], [-2.94, 0.004]],
+  tumble: [[2.74, 0.1], [1.14, 0.085], [-0.96, 0.085], [-2.94, 0.09]],
+  nose: { halfWidth: [0.28, 0.82, 3.2], edge: [0.12, 1.22, 3.2], crown: [0.12, 0.015, 2], sill: [0.18, 0.55, 2.2], shoulder: [0.18, 1.04, 2.8] },
+  tail: { halfWidth: [0.22, 0.86, 3.2], edge: [0.06, 1.28, 3], crown: [0.06, 0.004, 2], sill: [0.18, 0.56, 2.2], shoulder: [0.16, 1.1, 2.8] },
+  noseRake: { length: 0.34, y: [[0.5, 0.045], [0.62, 0], [1.18, 0], [1.26, 0.018], [1.34, 0.045]], plan: 0.038 },
+  tailRake: { length: 0.3, y: [[0.52, 0.055], [0.64, 0], [0.8, 0], [0.9, 0.018], [1.3, 0.022]], plan: 0.03 },
+  cabin: {
+    cowl: 1.14,
+    roofFront: 0.34,
+    roofRear: -0.68,
+    deck: -0.96,
+    roofY: [[0.34, 1.965], [-0.16, 1.99], [-0.68, 1.975]],
+    rail: [0.75, 0.74],
+    inset: 0.035,
+    bulge: 0.012,
+    roofEdge: 0.055,
+    roofCrown: 0.028,
+    roofRound: 4.5,
+    pillars: [0.1],
+    glassEnd: -0.78
+  },
+  doors: [1.06, 0.1, -0.78],
+  handles: [0.26, -0.58],
+  headlight: [0.73, 1.09, 0.21, 0.11],
+  taillight: [0.8, 1.1, 0.16, 0.14],
+  grille: [0.99, 0.48, 0.235],
+  intake: [0.61, 0.52, 0.065],
+  plates: [0.66, 0.92],
+  bumperLine: [1.24, 0.8],
+  bumpers: [[0.6, 0.045], [0.6, 0.045]],
+  mirrorScale: [1.28, 1.32, 1.12],
+  chrome: true,
+  cladding: 0.55,
+  sign: false,
+  rails: false,
+  rearWiper: false,
+  bedCover: true
+};
+// High-roof delivery van (~Mercedes Sprinter / Ford Transit 148"): short sloped nose, a tall wide windshield, glass
+// only in the cab doors, flat cargo sides & a flat rear (spec.cargo, see buildCargoCabin). spec.cabin describes the cab
+// alone, its roof ending at the B-pillar, so the material's windshield & door glass outlines land on the cab.
+BODY_SPECS.van = {
+  name: 'van',
+  zFront: 2.8,
+  zRear: -3.08,
+  wheelRadius: 0.38,
+  wheelZ: 1.8,
+  wheelX: 0.86,
+  archGap: 0.05,
+  archFlare: 0.012,
+  tuck: 0.05,
+  lowerRound: 4,
+  upperRound: 5,
+  upperSamples: [1],
+  halfWidth: [[2.8, 0.95], [1.8, 0.99], [0.8, 1.0], [-3.08, 1.0]],
+  sill: [[2.8, 0.36], [2.1, 0.42], [1.2, 0.45], [-3.08, 0.48]],
+  shoulder: [[2.8, 0.66], [2.2, 0.82], [1.6, 0.9], [-3.08, 0.92]],
+  edge: [[2.64, 0.97], [2.2, 1.08], [1.75, 1.18], [1.0, 1.21], [0.4, 1.22], [-3.08, 1.22]],
+  crown: [[2.64, 0.03], [1.9, 0.025], [1.6, 0.004], [-3.08, 0]],
+  tumble: [[2.8, 0.1], [2.0, 0.06], [1.3, 0.015], [-3.08, 0.015]],
+  nose: { halfWidth: [0.38, 0.74, 2.6], edge: [0.16, 0.95, 2.4], crown: [0.16, 0.01, 2], sill: [0.18, 0.4, 2], shoulder: [0.24, 0.62, 2.4] },
+  tail: { halfWidth: [0.09, 0.93, 3.2], edge: [0.03, 1.2, 3], crown: [0.03, 0, 2], sill: [0.08, 0.5, 2], shoulder: [0.08, 0.9, 3] },
+  noseRake: { length: 0.55, y: [[0.32, 0.06], [0.45, 0], [0.7, 0], [0.85, 0.05], [1.0, 0.12]], plan: 0.09 },
+  cabin: {
+    cowl: 1.75,
+    roofFront: 1.22,
+    roofRear: 0.48, // B-pillar: the cab's glass ends here, the cargo box (spec.cargo) carries the roof on to the tail
+    deck: 0.42,
+    roofY: [[1.22, 2.02], [0.48, 2.02]],
+    rail: [0.92, 0.94],
+    inset: 0,
+    bulge: 0.006,
+    roofEdge: 0.06,
+    roofCrown: 0.03,
+    roofRound: 4,
+    pillars: [-0.1, -0.9], // behind the door glass: no B / C pillar bars
+    glassEnd: 0.44
+  },
+  cargo: {
+    // High roof above the cab roof along z; its first knot is the windshield header (cabin.roofFront)
+    rise: [[1.22, 0], [1.08, 0.12], [0.9, 0.29], [0.7, 0.44], [0.5, 0.54], [0.28, 0.6], [0.05, 0.62], [-2.94, 0.62], [-3.08, 0.585]],
+    roofEdge: 0.15, // height of the high roof's rounded shoulder
+    roofRound: 4,
+    bumper: [0.42, 0.62, 0.08] // rear step bumper: bottom, top, protrusion
+  },
+  doors: [1.32, 0.42, 0.33, -0.97], // front door, sliding door
+  handles: [0.55, 0.22],
+  headlight: [0.66, 0.84, 0.24, 0.08],
+  taillight: [0.9, 0.9, 0.065, 0.28],
+  grille: [0.73, 0.42, 0.13],
+  intake: [0.46, 0.5, 0.05],
+  plates: [0.47, 0.78],
+  bumperLine: [0.575, 0.62],
+  bumpers: [[0.48, 0.07], [0.52, 0.1]],
+  chrome: false,
+  cladding: 0.56,
+  mirrorScale: [1.3, 2.6, 1.1],
+  sign: false,
+  rails: false,
+  rearWiper: false,
+  // Painted van details (optional fields): no light bar between the tail lamps, rear barn doors (half-width, top) and
+  // a curb-side (-x) sliding door (front z, rear z, top) running up the cargo side
+  tailStrip: false,
+  barnDoors: [0.8, 2.34],
+  slidingDoor: [0.33, -0.97, 2.28]
+};
+// Minivan (~Toyota Sienna / Honda Odyssey): low sloping nose, very fast windshield, long roof, sliding side doors,
+// long rear quarter glass & a steep hatch.
+BODY_SPECS.minivan = {
+  name: 'minivan',
+  zFront: 2.5,
+  zRear: -2.67,
+  wheelRadius: 0.37,
+  wheelZ: 1.515,
+  wheelX: 0.845,
+  archGap: 0.045,
+  archFlare: 0.02,
+  tuck: 0.06,
+  halfWidth: [[2.5, 0.93], [1.515, 0.975], [0, 0.985], [-1.515, 0.98], [-2.67, 0.955]],
+  sill: [[2.5, 0.33], [1.2, 0.31], [-1.2, 0.31], [-2.67, 0.38]],
+  shoulder: [[2.5, 0.72], [1.5, 0.8], [0, 0.82], [-1.5, 0.84], [-2.67, 0.84]],
+  edge: [[2.36, 0.88], [1.9, 0.95], [1.55, 1.0], [0.8, 1.04], [-0.5, 1.07], [-1.6, 1.11], [-2.3, 1.13], [-2.6, 1.11]],
+  crown: [[2.36, 0.035], [1.6, 0.03], [1.4, 0.004], [-2.67, 0.004]],
+  tumble: [[2.5, 0.12], [1.5, 0.1], [-1.5, 0.1], [-2.67, 0.12]],
+  nose: { halfWidth: [0.36, 0.7, 2.7], edge: [0.16, 0.86, 2.5], crown: [0.16, 0.012, 2], sill: [0.18, 0.36, 2], shoulder: [0.24, 0.62, 2.5] },
+  tail: { halfWidth: [0.26, 0.8, 2.8], edge: [0.07, 1.06, 3], crown: [0.07, 0.004, 2], sill: [0.16, 0.44, 2], shoulder: [0.2, 0.84, 2.6] },
+  noseRake: { length: 0.6, y: [[0.3, 0.08], [0.45, 0], [0.62, 0], [0.75, 0.04], [0.9, 0.11]], plan: 0.08 },
+  tailRake: { length: 0.42, y: [[0.38, 0.08], [0.52, 0], [0.7, 0], [0.85, 0.02], [1.1, 0.05]], plan: 0.05 },
+  cabin: {
+    cowl: 1.55,
+    roofFront: 0.42,
+    roofRear: -2.2,
+    deck: -2.55,
+    roofY: [[0.42, 1.72], [-0.6, 1.765], [-1.6, 1.755], [-2.2, 1.715]],
+    rail: [0.76, 0.72],
+    inset: 0.03,
+    bulge: 0.012,
+    roofEdge: 0.06,
+    roofCrown: 0.03,
+    roofRound: 4,
+    pillars: [0.28, -0.98],
+    glassEnd: -1.98
+  },
+  doors: [1.05, 0.28, -0.98], // front door, sliding door
+  handles: [0.42, 0.15],
+  headlight: [0.66, 0.775, 0.24, 0.055],
+  taillight: [0.7, 1.0, 0.2, 0.07],
+  grille: [0.74, 0.3, 0.035],
+  intake: [0.49, 0.55, 0.12],
+  plates: [0.49, 0.84],
+  bumperLine: [0.68, 0.72],
+  bumpers: [[0.45, 0.04], [0.55, 0.04]],
+  chrome: false,
+  cladding: 0,
+  sign: false,
+  rails: false,
+  rearWiper: true
+};
+
 for (const spec of Object.values(BODY_SPECS)) {
   // Kept for code that places lamp flares: lamp heights (front, rear) and centres across the car
   spec.lamps = [spec.headlight[1], spec.taillight[1]];
@@ -389,16 +583,20 @@ function bodyProfile(spec) {
       if (Math.abs(d) < 1) flare = Math.max(flare, (1 - d * d) ** 2);
     }
     const W = rounded(z, W0(z) + spec.archFlare * flare, 'halfWidth');
-    let yB = rounded(z, B0(z), 'sill');
+    const ySill = rounded(z, B0(z), 'sill');
+    const archPow = spec.archPower || 2;
+    let yB = ySill;
     for (const axle of axles) {
       const d = Math.abs(z - axle);
-      if (d < archR) yB = Math.max(yB, spec.wheelRadius + Math.sqrt(archR * archR - d * d));
+      if (d < archR) {
+        yB = Math.max(yB, ySill + (spec.wheelRadius + archR - ySill) * Math.pow(1 - Math.pow(d / archR, archPow), 1 / archPow));
+      }
     }
     const yE = rounded(z, E0(z), 'edge');
     const yT = yE + Math.max(0, rounded(z, C0(z), 'crown'));
     const yS = Math.min(Math.max(rounded(z, S0(z), 'shoulder'), yB + 0.035), yE - 0.035);
     const xE = Math.max(W - T0(z), W * 0.55);
-    return { z, W, yB, yS, yE, yT, xE, xB: W - spec.tuck };
+    return { z, W, yB, ySill, yS, yE, yT, xE, xB: W - spec.tuck };
   };
   spec._body = body;
   return body;
@@ -410,6 +608,10 @@ function bodyProfile(spec) {
  */
 function carLayout(spec) {
   if (spec._layout) return spec._layout;
+  if (!spec.lamps && spec.headlight && spec.taillight) {
+    spec.lamps = [spec.headlight[1], spec.taillight[1]];
+    spec.lampX = [spec.headlight[0], spec.taillight[0]];
+  }
   const body = bodyProfile(spec);
   const archR = spec.wheelRadius + spec.archGap;
   const cab = spec.cabin;
@@ -489,7 +691,13 @@ function bodyHalfProfile(s, detail, spec = {}) {
   const top = detail ? [0.66, 0.33] : [0.5];
   for (const a of low) {
     const th = (a * Math.PI) / 2;
-    right.push([s.xB + (s.W - s.xB) * Math.pow(Math.sin(th), 2 / n1), s.yS - (s.yS - s.yB) * Math.pow(Math.cos(th), 2 / n1)]);
+    const y = s.yS - (s.yS - s.yB) * Math.pow(Math.cos(th), 2 / n1);
+    if (s.ySill !== undefined) {
+      const u = Math.min(1, Math.max(0, (s.yS - y) / Math.max(s.yS - s.ySill, 1e-4)));
+      right.push([s.xB + (s.W - s.xB) * Math.pow(Math.max(0, 1 - Math.pow(u, n1)), 1 / n1), y]);
+    } else {
+      right.push([s.xB + (s.W - s.xB) * Math.pow(Math.sin(th), 2 / n1), y]);
+    }
   }
   for (const a of up) {
     const th = (a * Math.PI) / 2;
@@ -499,15 +707,22 @@ function bodyHalfProfile(s, detail, spec = {}) {
   return right;
 }
 
+// Cars place their sections at the features (tips, nose & tail roundings, wheel arches, cowl & deck) and fill the gaps
+// in between: finely over the hood & deck, coarsely along the doors, where the cabin hides the body's top. Other
+// lofts (the bus) keep a regular step plus the feature stations.
 function bodyStations(spec, detail) {
   const zs = [];
   const add = (z) => zs.push(Math.min(spec.zFront, Math.max(spec.zRear, z)));
+  const cab = spec.cabin;
   const step = detail ? spec.stationStep || 0.28 : 0.75;
-  for (let z = spec.zRear; z < spec.zFront; z += step) add(z);
+  if (!cab) {
+    for (let z = spec.zRear; z < spec.zFront; z += step) add(z);
+  }
   add(spec.zFront);
+  add(spec.zRear);
   const noseLen = Math.max(...Object.values(spec.nose).map((v) => v[0]));
   const tailLen = Math.max(...Object.values(spec.tail).map((v) => v[0]));
-  for (const u of detail ? [0, 0.3, 0.52, 0.7, 0.83, 0.92, 0.97, 0.993] : [0, 0.6, 0.92]) {
+  for (const u of detail ? [0, 0.3, 0.52, 0.7, 0.83, 0.92, 0.97, 0.993] : [0, 0.72]) {
     add(spec.zFront - noseLen * (1 - u));
     add(spec.zRear + tailLen * (1 - u));
   }
@@ -515,12 +730,14 @@ function bodyStations(spec, detail) {
   const k = detail ? 8 : 4;
   for (const axle of [spec.wheelZ, -spec.wheelZ]) {
     for (let i = 0; i <= k; i++) add(axle + archR * Math.cos((i / k) * Math.PI));
-    add(axle + archR + 0.006);
-    add(axle - archR - 0.006);
+    if (!cab) {
+      add(axle + archR + 0.006);
+      add(axle - archR - 0.006);
+    }
   }
-  if (detail && spec.cabin) {
-    add(spec.cabin.cowl);
-    add(spec.cabin.deck);
+  if (detail && cab) {
+    add(cab.cowl);
+    add(cab.deck);
   }
   zs.sort((a, b) => b - a);
   const eps = detail ? 0.004 : 0.04;
@@ -530,20 +747,126 @@ function bodyStations(spec, detail) {
   }
   out[0] = spec.zFront;
   out[out.length - 1] = spec.zRear;
-  return out;
+  if (!cab) return out;
+  const filled = [out[0]];
+  for (let i = 1; i < out.length; i++) {
+    const a = out[i - 1];
+    const b = out[i];
+    const mid = (a + b) / 2;
+    const gap = !detail ? (spec.proxyStep || 0.75) : mid < cab.cowl - 0.1 && mid > cab.deck + 0.1 ? 0.5 : (spec.stationStep || 0.27);
+    const n = Math.ceil((a - b) / gap - 0.15);
+    for (let j = 1; j < n; j++) filled.push(lerp(a, b, j / n));
+    filled.push(b);
+  }
+  return filled;
+}
+
+// Optional raked nose & tail, spec.noseRake / tailRake = { length, y: [[height, setback], ...], plan }: every body
+// vertex within `length` of the tip moves back by a setback that depends on its height (plus plan * x^2, which rounds
+// the fascia in plan view), eased in quadratically, so the fascia slopes back from the bumper up to the hood and the
+// tail tucks in under its lip instead of ending in vertical slabs. Returns (x, y, z) => z, or null (memoized).
+function bodyRake(spec) {
+  if (spec._rake !== undefined) return spec._rake;
+  const ends = [[spec.noseRake, spec.zFront, 1], [spec.tailRake, spec.zRear, -1]]
+    .filter(([rake]) => rake)
+    .map(([rake, tip, dir]) => ({ tip, dir, length: rake.length, plan: rake.plan || 0, setback: smoothCurve(rake.y) }));
+  spec._rake = ends.length
+    ? (x, y, z) => {
+      for (const e of ends) {
+        const u = ((z - e.tip) * e.dir + e.length) / e.length;
+        if (u > 0) return z - e.dir * (e.setback(y) + e.plan * x * x) * u * u;
+      }
+      return z;
+    }
+    : null;
+  return spec._rake;
+}
+
+// z of a body's nose (front) or tail surface on the centreline at height y, for plates & badges mounted on the tips
+function carTipZ(spec, y, front = true) {
+  const rake = bodyRake(spec);
+  const z = front ? spec.zFront : spec.zRear;
+  return rake ? rake(0, y, z) : z;
+}
+
+// Closes a raked body tip with a grid that follows the rake (a flat loft cap can't bow out at the bumper): each
+// right-half point of the tip section is joined to its mirror image by a row split into `columns`, the crown point
+// closes the top. Row 0 (the sill) stays straight so it meets the flat underbody without a gap. front: faces +z.
+function buildTipCap(right, top, z, rake, front, columns) {
+  const pos = [];
+  const index = [];
+  const row = columns + 1;
+  for (let i = 0; i < right.length; i++) {
+    const [x, y] = right[i];
+    for (let j = 0; j <= columns; j++) {
+      const px = x * ((2 * j) / columns - 1);
+      pos.push(px, y, rake(i === 0 ? x : px, y, z));
+    }
+  }
+  const apex = pos.length / 3;
+  pos.push(0, top, rake(0, top, z));
+  const tri = (a, b, c) => (front ? index.push(a, b, c) : index.push(a, c, b));
+  for (let i = 0; i < right.length - 1; i++) {
+    for (let j = 0; j < columns; j++) {
+      const a = i * row + j;
+      tri(a, a + 1, a + row + 1);
+      tri(a, a + row + 1, a + row);
+    }
+  }
+  const last = (right.length - 1) * row;
+  for (let j = 0; j < columns; j++) tri(last + j, last + j + 1, apex);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array((pos.length / 3) * 2), 2));
+  g.setIndex(index);
+  g.computeVertexNormals();
+  return g;
 }
 
 function buildBodyLoft(spec, detail = 1) {
   const body = bodyProfile(spec);
-  const sections = bodyStations(spec, detail).map((z) => {
+  const rake = bodyRake(spec);
+  const stations = bodyStations(spec, detail);
+  const sections = stations.map((z) => {
     const s = body(z);
-    return mirrorSection(bodyHalfProfile(s, detail, spec), [0, s.yT], z);
+    const section = mirrorSection(bodyHalfProfile(s, detail, spec), [0, s.yT], z);
+    if (rake) for (const p of section) p.z = rake(p.x, p.y, z);
+    return section;
   });
-  return new LoftGeometry(sections, { capStart: true, capEnd: true });
+  if (!rake) return new LoftGeometry(sections, { capStart: true, capEnd: true });
+  const loft = new LoftGeometry(sections, { closed: false });
+  const under = new LoftGeometry(sections.map((sec) => [sec[sec.length - 1], sec[0]]), { closed: false });
+  const cols = detail ? 4 : 1;
+  const ring = sections[0].length;
+  const row = cols + 1;
+  const nRight = (ring - 1) / 2;
+  const lNorm = loft.attributes.normal;
+  const caps = [0, stations.length - 1].map((si) => {
+    const s = body(stations[si]);
+    const cap = buildTipCap(bodyHalfProfile(s, detail, spec), s.yT, stations[si], rake, si === 0, cols);
+    const cNorm = cap.attributes.normal;
+    const base = si * ring;
+    const blend = (li, ci) => {
+      const nx = lNorm.getX(li) + cNorm.getX(ci);
+      const ny = lNorm.getY(li) + cNorm.getY(ci);
+      const nz = lNorm.getZ(li) + cNorm.getZ(ci);
+      const len = Math.hypot(nx, ny, nz) || 1;
+      lNorm.setXYZ(li, nx / len, ny / len, nz / len);
+      cNorm.setXYZ(ci, nx / len, ny / len, nz / len);
+    };
+    for (let i = 1; i < nRight; i++) {
+      blend(base + i, i * row);
+      blend(base + ring - 1 - i, i * row + cols);
+    }
+    blend(base + nRight, nRight * row);
+    return part(cap, CAR_PARTS.BODY);
+  });
+  return mergeGeometries([part(loft, CAR_PARTS.BODY), ...caps, part(under, CAR_PARTS.TRIM)]);
 }
 
 function buildCarBody(spec, detail = 1) {
-  return part(buildBodyLoft(spec, detail), CAR_PARTS.BODY);
+  const g = buildBodyLoft(spec, detail);
+  return g.getAttribute('partId') ? g : part(g, CAR_PARTS.BODY);
 }
 
 function cabinSection(c, detail, roundness) {
@@ -571,9 +894,85 @@ function cabinStations(spec, detail) {
 }
 
 function buildCarCabin(spec, detail = 1) {
+  if (spec.cargo) return buildCargoCabin(spec, detail);
   const L = carLayout(spec);
   const sections = cabinStations(spec, detail).map((z) => cabinSection(L.cabin(z), detail, spec.cabin.roofRound));
   return part(new LoftGeometry(sections, { closed: false }), CAR_PARTS.WINDOW);
+}
+
+// Delivery van upper body (spec.cargo), built instead of the glasshouse: one WINDOW loft from the cowl to the tail.
+// spec.cabin describes the cab alone (its roof ends at the B-pillar), so up to the windshield header the sections are
+// carLayout's and the material's windshield & door glass outlines land on them as on any car. Behind the header the
+// roof rises into a high-roof cap (spec.cargo.rise above the cab roof) and runs flat over the cargo box, whose sides
+// carry the door glass plane on up to the roof shoulder; the tail closes with a flat rear face on the body's rounded
+// plan corners, over a black step bumper.
+function buildCargoCabin(spec, detail = 1) {
+  const L = carLayout(spec);
+  const cab = spec.cabin;
+  const cargo = spec.cargo;
+  const rise = smoothCurve(cargo.rise);
+  const fullRise = Math.max(...cargo.rise.map((p) => p[1]));
+  const H = cab.roofEdge + cab.roofCrown;
+  const rr = L.rail.rear;
+  const bR = L.body(cab.roofRear);
+  // Lean (dx / dy) of the door glass at the B-pillar, continued up the cargo sides
+  const lean = (bR.xE - cab.inset - rr.x) / (rr.y - (bR.yE - 0.004));
+  const n = cargo.roofRound;
+  const section = (z) => {
+    let c;
+    if (z >= cab.roofRear) {
+      c = L.cabin(z);
+    } else {
+      const s = L.body(z);
+      const beltX = s.xE - cab.inset;
+      const beltY = s.yE - 0.004;
+      c = { beltX, beltY, railX: beltX - (rr.y - beltY) * lean, railY: rr.y, h: H, bulge: cab.bulge };
+    }
+    const up = z < cab.roofFront ? rise(z) : 0;
+    // The roof's rounded shoulder grows from the cab roof's edge to the high roof's as the cap rises
+    const hR = lerp(c.h, cargo.roofEdge, Math.min(1, up / fullRise));
+    const top = c.railY + c.h + up;
+    const sy = top - hR;
+    const sx = c.railX - (sy - c.railY) * lean;
+    const round = (f, x, y) => {
+      const th = (f * Math.PI) / 2;
+      return [x * Math.pow(Math.cos(th), 2 / n), y + hR * Math.pow(Math.sin(th), 2 / n)];
+    };
+    const right = [[c.beltX, c.beltY]];
+    if (detail) {
+      for (const t of [1 / 3, 2 / 3]) {
+        right.push([lerp(c.beltX, c.railX, t) + c.bulge * 4 * t * (1 - t), lerp(c.beltY, c.railY, t)]);
+      }
+      right.push([c.railX, c.railY]);
+      // Under the cab roof the shoulder vertex slides onto the roof's rounding instead of doubling the rail
+      const k = Math.min(1, up / 0.05);
+      const r0 = round(0.1, sx, sy);
+      right.push([lerp(r0[0], sx, k), lerp(r0[1], sy, k)]);
+    } else {
+      right.push([sx, sy]);
+    }
+    for (const f of detail ? [0.2, 0.42, 0.68] : [0.5]) right.push(round(f, sx, sy));
+    return mirrorSection(right, [0, top], z);
+  };
+  // Sections along the windshield, at the rise curve's knots (the first one is the windshield header) and on the
+  // tail's plan rounding; the far proxy keeps the header, the end of the cap and the tail
+  const zr = spec.zRear;
+  const knots = cargo.rise.map((p) => p[0]).filter((z) => z > zr);
+  const capEnd = cargo.rise.find((p) => p[1] === fullRise)[0];
+  const zs = detail
+    ? [...[0, 0.12, 0.3, 0.55, 0.8].map((t) => lerp(cab.cowl, cab.roofFront, t)), ...knots, zr + 0.045, zr + 0.015, zr]
+    : [cab.cowl, cab.roofFront, lerp(cab.roofFront, capEnd, 0.4), capEnd, zr];
+  const parts = [part(new LoftGeometry(zs.map(section), { closed: false, capEnd: true }), CAR_PARTS.WINDOW)];
+  if (detail) {
+    // Step bumper wrapping around the rear corners: a plan-view rounded rectangle extruded upwards
+    const [bottom, top, depth] = cargo.bumper;
+    const outline = roundedRectShape(L.body(zr + 0.1).W, depth, depth * 0.9);
+    const bumper = new THREE.ExtrudeGeometry(outline, { depth: top - bottom, bevelEnabled: false, curveSegments: 2 })
+      .rotateX(Math.PI / 2)
+      .translate(0, top, zr);
+    parts.push(part(bumper, CAR_PARTS.TRIM));
+  }
+  return mergeGeometries(parts);
 }
 
 /**
@@ -663,75 +1062,76 @@ function roundedBox(hw, hh, depth, r, bevel = 0.012) {
   return g.translate(0, 0, -(depth - 2 * bevel) / 2);
 }
 
+const WHEEL_SEGMENTS = 18;
+
 /**
- * Builds a single wheel assembly (LatheGeometry tyre + recessed alloy lip + dished hub)
- * centered at the origin (for steerable/spinning player wheels) or translated to (x, r, z).
+ * Builds a single wheel assembly centered at the origin (for steerable/spinning player wheels) or translated to
+ * (x, r, z): a low-profile LatheGeometry tyre (flat tread, rounded shoulders, bulged sidewalls), a concave alloy face
+ * (rim flange dishing in to a domed centre cap) and a dark disc closing the tyre from the inboard side.
  */
 function buildWheelParts(spec, side, translateToAxle = false, z = 0) {
   const r = spec.wheelRadius;
-  const rim = r * 0.64;
+  const rim = r * 0.68;
   const width = r * 0.68;
-  const wheelProfile = [
-    new THREE.Vector2(rim + 0.014, -width * 0.44),
-    new THREE.Vector2(r * 0.96, -width * 0.33),
-    new THREE.Vector2(r, -width * 0.05),
-    new THREE.Vector2(r, width * 0.05),
-    new THREE.Vector2(r * 0.96, width * 0.33),
-    new THREE.Vector2(rim + 0.014, width * 0.44)
-  ];
+  const bead = rim + 0.006;
+  const hubR = rim * 0.3;
+  // Lathe profiles run from inboard (-) to outboard (+) along the axle; LatheGeometry revolves them about y
+  const tyre = new THREE.LatheGeometry([
+    new THREE.Vector2(bead, -width * 0.42),
+    new THREE.Vector2(r * 0.86, -width * 0.5),
+    new THREE.Vector2(r, -width * 0.33),
+    new THREE.Vector2(r, width * 0.33),
+    new THREE.Vector2(r * 0.86, width * 0.5),
+    new THREE.Vector2(bead, width * 0.42)
+  ], WHEEL_SEGMENTS);
+  const face = new THREE.LatheGeometry([
+    new THREE.Vector2(bead, width * 0.42),
+    new THREE.Vector2(rim - 0.01, width * 0.4),
+    new THREE.Vector2(hubR, width * 0.25)
+  ], WHEEL_SEGMENTS);
+  // Centre cap: a fan whose rim vertices coincide with the face's inner ring (CircleGeometry turned onto the lathe
+  // axis, phase-shifted to the lathe's angles)
+  const cap = new THREE.CircleGeometry(hubR, WHEEL_SEGMENTS, -Math.PI / 2);
+  cap.attributes.position.setZ(0, 0.012);
+  cap.computeVertexNormals();
+  cap.rotateX(-Math.PI / 2).translate(0, width * 0.25, 0);
+  // Closes the tyre's inboard bead hole: a 9-gon whose edges stay outside the bead circle
+  const back = new THREE.CircleGeometry((bead + 0.003) / Math.cos(Math.PI / 9), 9)
+    .rotateX(Math.PI / 2)
+    .translate(0, -width * 0.4, 0);
 
   const x = translateToAxle ? side * spec.wheelX : 0;
   const y = translateToAxle ? r : 0;
   const zOff = translateToAxle ? z : 0;
-
-  const tyre = new THREE.LatheGeometry(wheelProfile, 20)
-    .rotateZ(-side * Math.PI * 0.5)
-    .translate(x, y, zOff);
-  const lip = new THREE.LatheGeometry(
-    [new THREE.Vector2(rim + 0.014, width * 0.44), new THREE.Vector2(rim, width * 0.29)],
-    20
-  )
-    .rotateZ(-side * Math.PI * 0.5)
-    .translate(x, y, zOff);
-  const backLip = new THREE.LatheGeometry(
-    [new THREE.Vector2(rim, -width * 0.29), new THREE.Vector2(rim + 0.014, -width * 0.44)],
-    20
-  )
-    .rotateZ(-side * Math.PI * 0.5)
-    .translate(x, y, zOff);
-  const hub = new THREE.CircleGeometry(rim, 20);
-  hub.attributes.position.setZ(0, -0.015);
-  hub.computeVertexNormals();
-  hub.rotateY(side * Math.PI * 0.5).translate(x + side * width * 0.29, y, zOff);
-
-  const backHub = new THREE.CircleGeometry(rim, 20);
-  backHub.attributes.position.setZ(0, -0.015);
-  backHub.computeVertexNormals();
-  backHub.rotateY(-side * Math.PI * 0.5).translate(x - side * width * 0.29, y, zOff);
-
-  const list = [
-    part(tyre, CAR_PARTS.TYRE),
-    part(lip, CAR_PARTS.ALLOY),
-    part(backLip, CAR_PARTS.ALLOY),
-    part(hub, CAR_PARTS.ALLOY),
-    part(backHub, CAR_PARTS.ALLOY)
-  ];
+  const list = [part(tyre, CAR_PARTS.TYRE), part(face, CAR_PARTS.ALLOY), part(cap, CAR_PARTS.ALLOY), part(back, CAR_PARTS.TRIM)];
+  for (const g of list) g.rotateZ(-side * Math.PI * 0.5).translate(x, y, zOff);
 
   if (translateToAxle) list.push(buildWheelWell(spec, side, z));
   return list;
 }
 
-// Dark arch liner behind a wheel, so the arch never shows through to the other side of the car
+// Dark arch liner behind a wheel, reaching down to the sill so the arch never shows through to the other side
 function buildWheelWell(spec, side, z) {
   const r = spec.wheelRadius;
+  const archR = r + spec.archGap;
   const width = r * 0.68;
-  const wellOuter = new THREE.CircleGeometry(spec.wheelRadius + spec.archGap + 0.01, 10, 0, Math.PI)
-    .rotateY(side * Math.PI * 0.5)
-    .translate(side * (spec.wheelX - (width * 0.5 + 0.02)), r, z);
-  const wellInner = new THREE.CircleGeometry(spec.wheelRadius + spec.archGap + 0.01, 10, 0, Math.PI)
-    .rotateY(-side * Math.PI * 0.5)
-    .translate(side * (spec.wheelX - (width * 0.5 + 0.02)), r, z);
-  return part(mergeGeometries([wellOuter, wellInner]), CAR_PARTS.TRIM);
+  const y0 = spec.sill[1][1];
+  const rx = archR + 0.015;
+  const ry = r + archR - y0 + 0.015;
+  const x = side * (spec.wheelX - (width * 0.5 + 0.02));
+  const archPow = spec.archPower || 2;
+  const makeHalf = (rotY) => {
+    const geo = new THREE.CircleGeometry(1, 10, 0, Math.PI);
+    if (archPow !== 2) {
+      const pos = geo.attributes.position;
+      for (let i = 1; i < pos.count; i++) {
+        const u = Math.min(1, Math.abs(pos.getX(i)));
+        pos.setY(i, Math.pow(1 - Math.pow(u, archPow), 1 / archPow));
+      }
+    }
+    return geo.scale(rx, ry, 1).rotateY(rotY).translate(x, y0, z);
+  };
+  return part(mergeGeometries([makeHalf(side * Math.PI * 0.5), makeHalf(-side * Math.PI * 0.5)]), CAR_PARTS.TRIM);
 }
 
 function buildSteerableWheelGeo(spec, side) {
@@ -742,9 +1142,11 @@ function buildMirrors(spec) {
   const L = carLayout(spec);
   const z = spec.cabin.cowl - 0.17;
   const c = L.cabin(z);
+  const [sx, sy, sz] = spec.mirrorScale || [1, 1, 1];
   const list = [];
   for (const side of [-1, 1]) {
     const housing = roundedBox(0.1, 0.06, 0.085, 0.035, 0.014)
+      .scale(sx, sy, sz)
       .rotateY(side * 0.12)
       .translate(side * (c.beltX + 0.15), c.beltY + 0.085, z - 0.02);
     const arm = new THREE.BoxGeometry(0.12, 0.035, 0.06)
@@ -812,35 +1214,31 @@ function buildTaxiSign(spec) {
   return [part(sign, CAR_PARTS.SIGN), part(mount, CAR_PARTS.TRIM)];
 }
 
-// Wrap the bumper strips around the nose and tail. Six rectangular sections cost just 44 triangles each;
-// the inner faces sit in the body, while the outer faces stand 2.5 cm proud of the tips.
-function buildBumpers(spec) {
-  return spec.bumpers.map(([y, h], end) => {
-    const direction = end === 0 ? 1 : -1;
-    const tip = end === 0 ? spec.zFront : spec.zRear;
-    const sections = [];
-    for (const side of [-1, 1]) {
-      for (const setback of side < 0 ? [0.3, 0.07, 0] : [0, 0.07, 0.3]) {
-        const z = tip - direction * setback;
-        const x = side * (carBodyHalfWidthAt(spec, z, y) + 0.012);
-        const innerX = x - side * 0.05;
-        const outerZ = z + direction * 0.025;
-        const innerZ = z - direction * 0.105;
-        const section = [
-          new THREE.Vector3(x, y - h, outerZ),
-          new THREE.Vector3(innerX, y - h, innerZ),
-          new THREE.Vector3(innerX, y + h, innerZ),
-          new THREE.Vector3(x, y + h, outerZ)
-        ];
-        sections.push(direction > 0 ? section : section.reverse());
-      }
-    }
-    return part(new LoftGeometry(sections, { capStart: true, capEnd: true }), CAR_PARTS.TRIM);
+// Matte-black tonneau cover and bed-side rail caps over a pickup truck's bed (behind cabin.deck)
+function buildBedCover(spec) {
+  const body = bodyProfile(spec);
+  const zs = [spec.cabin.deck - 0.01, spec.zRear + 0.42, spec.zRear + 0.08];
+  const sections = zs.map((z) => {
+    const s = body(z);
+    const x = s.xE - 0.045;
+    const y = s.yE + 0.014;
+    return [
+      [-x, y],
+      [-x + 0.006, y + 0.032],
+      [-x + 0.056, y + 0.032],
+      [-x + 0.068, y + 0.02],
+      [x - 0.068, y + 0.02],
+      [x - 0.056, y + 0.032],
+      [x - 0.006, y + 0.032],
+      [x, y]
+    ].map(([px, py]) => new THREE.Vector3(px, py, z));
   });
+  return [part(new LoftGeometry(sections, { closed: false, capStart: false, capEnd: true }), CAR_PARTS.TRIM)];
 }
 
+// Bumpers are part of the body loft (the raked nose & tail): body-coloured fascias, like modern cars'
 function buildCarGeometry(spec, includeWheels = true) {
-  const parts = [buildCarBody(spec, 1), buildCarCabin(spec, 1), ...buildMirrors(spec), ...buildBumpers(spec)];
+  const parts = [buildCarBody(spec, 1), buildCarCabin(spec, 1), ...buildMirrors(spec)];
   for (const side of [-1, 1]) {
     for (const z of [-spec.wheelZ, spec.wheelZ]) {
       if (includeWheels) parts.push(...buildWheelParts(spec, side, true, z));
@@ -848,6 +1246,7 @@ function buildCarGeometry(spec, includeWheels = true) {
     }
   }
   if (spec.rails) parts.push(...buildRoofRails(spec));
+  if (spec.bedCover) parts.push(...buildBedCover(spec));
   if (spec.sign) parts.push(...buildTaxiSign(spec));
   return mergeGeometries(parts);
 }
@@ -860,7 +1259,10 @@ function buildCarProxyGeometry(spec) {
   const r = spec.wheelRadius;
   for (const side of [-1, 1]) {
     for (const z of [-spec.wheelZ, spec.wheelZ]) {
-      parts.push(part(new THREE.BoxGeometry(r * 0.6, r * 1.7, r * 1.7).translate(side * spec.wheelX, r * 0.88, z), CAR_PARTS.TYRE));
+      const wheel = new THREE.CylinderGeometry(r * 0.96, r * 0.96, r * 0.62, 6)
+        .rotateZ(Math.PI * 0.5)
+        .translate(side * spec.wheelX, r, z);
+      parts.push(part(wheel, CAR_PARTS.TYRE));
     }
   }
   if (spec.sign) {
@@ -887,31 +1289,37 @@ function buildLightbarGeometry(spec = BODY_SPECS.sedan) {
 
 let _lightbarMat = null;
 
-// Light bar lenses: red & blue halves flashing in alternation (double strobes), each car on its own phase
+// Light bar lenses: NYPD red (-x), blue (+x) & centre white takedown LED pods flashing in alternation per cruiser
 function createLightbarMaterial() {
   if (_lightbarMat) return _lightbarMat;
-  const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.18, metalness: 0.1 });
+  const mat = new THREE.MeshStandardNodeMaterial({ roughness: 0.12, metalness: 0.25 });
   const lightbar = () => {
     const p = attribute('position', 'vec3');
     const partId = attribute('partId', 'float');
     const isLens = step(abs(partId.sub(CAR_PARTS.SIGN)), 0.25);
     const phase = fract(float(instanceIndex).mul(0.61803)).toVar();
-    const t = fract(time.mul(1.6).add(phase)).toVar();
-    const strobe = step(0.5, fract(t.mul(6.0)));
+    const t = fract(time.mul(1.75).add(phase)).toVar();
+    const strobe = step(0.45, fract(t.mul(6.0)));
     const redOn = step(t, 0.5).mul(strobe);
     const blueOn = step(0.5, t).mul(strobe);
-    const isRed = step(p.x, -0.035);
-    const isBlue = step(0.035, p.x);
-    return { isLens, redOn, blueOn, isRed, isBlue };
+    const whiteOn = step(0.75, fract(t.mul(3.0))).mul(strobe);
+    const isRed = smoothstep(-0.045, -0.065, p.x);
+    const isBlue = smoothstep(0.045, 0.065, p.x);
+    const isWhite = float(1.0).sub(max(isRed, isBlue));
+    const pod = smoothstep(-0.05, 0.35, sin(p.x.mul(52.0))).mul(0.35).add(0.65);
+    return { isLens, redOn, blueOn, whiteOn, isRed, isBlue, isWhite, pod };
   };
   mat.colorNode = Fn(() => {
     const s = lightbar();
-    const lens = mix(mix(color(0xd8dde2), color(0x8a0d12), s.isRed), color(0x0f3c9a), s.isBlue);
-    return mix(color(0x15181b), lens, s.isLens);
+    const lens = mix(mix(color(0xdce2e8), color(0x8e0d14), s.isRed), color(0x0f3c9a), s.isBlue).mul(s.pod);
+    return mix(color(0x14171a), lens, s.isLens);
   })();
   mat.emissiveNode = Fn(() => {
     const s = lightbar();
-    return color(0xff1a22).mul(s.isRed.mul(s.redOn).mul(6.0)).add(color(0x2a6cff).mul(s.isBlue.mul(s.blueOn).mul(7.0))).mul(s.isLens);
+    const rEmit = color(0xff1820).mul(s.isRed.mul(s.redOn).mul(6.2));
+    const bEmit = color(0x286eff).mul(s.isBlue.mul(s.blueOn).mul(7.2));
+    const wEmit = color(0xf4f8ff).mul(s.isWhite.mul(s.whiteOn).mul(3.8));
+    return rEmit.add(bEmit).add(wEmit).mul(s.pod).mul(s.isLens);
   })();
   _lightbarMat = mat;
   return mat;
@@ -934,14 +1342,26 @@ const smax = (a, b, k) => {
   return max(a, b).add(h.mul(h).mul(k * 0.25));
 };
 
-// Signed distance (approximate outside, exact inside) to a convex polygon given as outward half-planes [nx, ny, c]
-const polygonDistance = (px, py, planes, k) => {
+// Signed distance (approximate outside, exact inside) to a convex polygon given as outward half-planes [nx, ny, c],
+// and the screen footprint across its nearest edge: the per-axis footprints (fu, fv) of the polygon's coordinates
+// weighted by the normal of the half-plane that dominates the distance
+const polygonEdge = (px, py, planes, k, fu, fv) => {
   let d = null;
+  let w = null;
+  let nearest = null;
   for (const [nx, ny, c] of planes) {
     const e = px.mul(nx).add(py.mul(ny)).sub(c);
-    d = d === null ? e : smax(d, e, k);
+    const we = fu.mul(Math.abs(nx)).add(fv.mul(Math.abs(ny)));
+    if (d === null) {
+      d = nearest = e;
+      w = we;
+    } else {
+      d = smax(d, e, k);
+      w = mix(w, we, step(nearest, e));
+      nearest = max(nearest, e);
+    }
   }
-  return d;
+  return { d, w };
 };
 
 // Outward half-planes of a counter-clockwise polygon, each edge moved in by its margin
@@ -958,38 +1378,56 @@ function polygonPlanes(points, margins) {
   return planes;
 }
 
-const coverage = (d) => {
-  const w = max(fwidth(d), 0.0008);
-  return smoothstep(w, w.negate(), d);
-};
+// Packs per-instance style fields into carState.w (livery 0..7, metallic 0..1, trim 0..3, wheelStyle 0..3).
+// Livery 1 with default options encodes to 1, keeping existing NYPD carState.w = 1 checks compatible.
+function carStyleCode({ livery = 0, metallic = 0, trim = 0, wheel = 0 } = {}) {
+  return (livery & 7) + ((metallic & 1) << 3) + ((trim & 3) << 4) + ((wheel & 3) << 6);
+}
 
 const _carMaterialCache = new Map();
 let _carPlateTexture;
 
-// One small generated atlas serves every rear plate, with mipmaps for distant traffic.
+// One small generated atlas serves every rear plate (3 Empire Gold + 1 Excelsior White), with mipmaps for distant traffic.
 function carPlateTexture() {
   if (_carPlateTexture) return _carPlateTexture;
   const canvas = document.createElement('canvas');
   canvas.width = 128;
   canvas.height = 256;
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#f2b718';
-  ctx.fillRect(0, 0, 128, 256);
-  ctx.fillStyle = '#17212c';
-  ctx.font = 'bold 25px monospace';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ['4KM 728', '7TR 319', '2BJ 506', '6XL 842'].forEach((label, row) => ctx.fillText(label, 64, row * 64 + 33));
+  const rows = [
+    { bg: '#f2b718', bar: '#14233c', fg: '#14233c', label: 'KBM-4728' },
+    { bg: '#e8edf2', bar: '#162b4c', fg: '#162b4c', label: 'JTR-8319' },
+    { bg: '#f2b718', bar: '#14233c', fg: '#14233c', label: 'HXL-2506' },
+    { bg: '#f0b416', bar: '#14233c', fg: '#14233c', label: 'T748219C' }
+  ];
+  rows.forEach(({ bg, bar, fg, label }, row) => {
+    const y0 = row * 64;
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, y0, 128, 64);
+    ctx.fillStyle = bar;
+    ctx.fillRect(0, y0, 128, 13);
+    ctx.fillRect(0, y0 + 56, 128, 8);
+    ctx.fillStyle = bg;
+    ctx.font = 'bold 9px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('NEW YORK', 64, y0 + 7);
+    ctx.fillStyle = fg;
+    ctx.font = 'bold 21px monospace';
+    ctx.fillText(label, 64, y0 + 35);
+  });
   _carPlateTexture = new THREE.CanvasTexture(canvas);
   _carPlateTexture.colorSpace = THREE.SRGBColorSpace;
+  _carPlateTexture.anisotropy = 16;
   return _carPlateTexture;
 }
 
 /**
  * Creates the TSL material for lofted vehicles.
  * Instanced traffic reads the per-instance `paintColor` (vec3) and `carState` (vec4: brake, left (+x) & right (-x)
- * turn signal, livery: 1 = police) attributes; with a fixed `fixedColorHex` (the player's taxi, wheels) the state is the
- * `material.userData.carState` uniform instead, with its fourth component controlling reverse lights.
+ * turn signal, style/livery code from `carStyleCode` where 1 = NYPD) attributes; with a fixed `fixedColorHex` (the
+ * player's taxi, or fixed wheels) the state is the `material.userData.carState` uniform instead, with its fourth
+ * component controlling reverse lights.
  * Every mask is built once and shared by the colour, roughness, metalness & emissive graphs (TSL turns nodes used
  * more than once into temporaries), so the fragment shader evaluates each SDF a single time.
  */
@@ -1006,36 +1444,56 @@ function createLoftedCarMaterial(spec, fixedColorHex = null) {
   const state = fixed ? stateUniform : attribute('carState', 'vec4');
   const paint = fixed ? color(fixedColorHex) : attribute('paintColor', 'vec3');
 
+  // Decode per-instance style code (livery 0..7, metallic 0..1, trim 0..3, wheel 0..3) in the vertex stage
+  const wCode = fixed ? float(0.0) : state.w;
+  const vStyle = varying(
+    vertexStage(
+      vec4(
+        floor(fract(wCode.div(8.0)).mul(8.0).add(0.5)),
+        step(0.5, fract(floor(wCode.div(8.0).add(0.01)).mul(0.5))),
+        floor(fract(floor(wCode.div(16.0).add(0.01)).mul(0.25)).mul(4.0).add(0.5)),
+        floor(wCode.div(64.0).add(0.01))
+      )
+    )
+  );
+  const livery = vStyle.x;
+  const isMetallic = vStyle.y;
+  const trimCode = vStyle.z;
+  const wheelCode = vStyle.w;
+  const isLivery = (id) => step(abs(livery.sub(id)), 0.25);
+
   const axleZ = float(spec.wheelZ);
   const wheelR = float(spec.wheelRadius);
   const archR = L.archR;
 
   // Glass outlines from the glasshouse layout: side windows in side view (z, y), windshield & backlight from above
-  // (|x|, z). Each edge is pulled in by its pillar / frame width; the seal outline sits a little further out.
+  // (|x|, z). Optional cab.glassEnd stops the side DLO ahead of the deck so the C / D pillar stays painted body colour.
   const bc = L.belt.cowl;
   const bd = L.belt.deck;
+  const glassEndZ = cab.glassEnd ?? cab.deck;
+  const bEndY = L.body(glassEndZ).yE - 0.004;
+  const rearEdgeMargin = cab.glassEnd !== undefined ? 0.034 : 0.065;
   const rf = L.rail.front;
   const rm = L.rail.mid;
   const rr = L.rail.rear;
-  const sidePoly = [[cab.cowl, bc.y], [cab.roofFront, rf.y], [L.rail.roofMid, rm.y], [cab.roofRear, rr.y], [cab.deck, bd.y]];
-  const sideGlassPlanes = polygonPlanes(sidePoly, [0.05, 0.03, 0.03, 0.065, 0.02]);
-  const sideSealPlanes = polygonPlanes(sidePoly, [0.034, 0.016, 0.016, 0.05, 0.004]);
+  const sidePoly = [[cab.cowl, bc.y], [cab.roofFront, rf.y], [L.rail.roofMid, rm.y], [cab.roofRear, rr.y], [glassEndZ, bEndY]];
+  const sideGlassPlanes = polygonPlanes(sidePoly, [0.048, 0.028, 0.028, rearEdgeMargin, 0.02]);
   const frontPoly = [[-1, cab.cowl], [-1, cab.roofFront], [rf.x, cab.roofFront], [bc.x, cab.cowl]];
-  const frontGlassPlanes = polygonPlanes(frontPoly, [0, 0.045, 0.06, 0.05]);
-  const frontSealPlanes = polygonPlanes(frontPoly, [0, 0.03, 0.045, 0.035]);
+  const frontGlassPlanes = polygonPlanes(frontPoly, [0, 0.042, 0.058, 0.048]);
   const rearPoly = [[-1, cab.roofRear], [-1, cab.deck], [bd.x, cab.deck], [rr.x, cab.roofRear]];
-  const rearGlassPlanes = polygonPlanes(rearPoly, [0, 0.045, 0.065, 0.05]);
-  const rearSealPlanes = polygonPlanes(rearPoly, [0, 0.03, 0.05, 0.035]);
+  const rearGlassPlanes = polygonPlanes(rearPoly, [0, 0.045, 0.062, 0.048]);
   const [hlX, hlY, hlW, hlH] = spec.headlight;
   const [tlX, tlY, tlW, tlH] = spec.taillight;
   const [grY, grW, grH] = spec.grille;
   const [inY, inW, inH] = spec.intake;
   const [plateF, plateR] = spec.plates;
-  const frontZone = spec.zFront - 0.55;
-  const rearZone = spec.zRear + 0.55;
+  const frontZone = spec.zFront - 0.58;
+  const rearZone = spec.zRear + 0.58;
   const sillY = spec.sill[1][1];
   const rearSill = spec.tail.sill[1];
   const signY = taxiSignPlacement(spec).y + 0.105;
+  const doorMid = (spec.doors[0] + spec.doors[1]) / 2;
+  const trunkBot = Math.min(spec.bumperLine[1], plateR - 0.115);
   const one = float(1.0);
 
   const p = attribute('position', 'vec3');
@@ -1046,249 +1504,513 @@ function createLoftedCarMaterial(spec, fixedColorHex = null) {
   const isWindow = isPart(CAR_PARTS.WINDOW);
   const isTyre = isPart(CAR_PARTS.TYRE);
   const isAlloy = isPart(CAR_PARTS.ALLOY);
-  const isTrim = isPart(CAR_PARTS.TRIM);
   const isMirror = isPart(CAR_PARTS.MIRROR);
   const isSign = isPart(CAR_PARTS.SIGN);
   const ax = abs(p.x);
   const isSide = smoothstep(0.45, 0.7, abs(n.x));
-  const front = smoothstep(0.12, 0.38, n.z).mul(step(frontZone, p.z)).mul(isBody);
-  const rear = smoothstep(0.12, 0.38, n.z.negate()).mul(step(p.z, rearZone)).mul(isBody);
-  const under = smoothstep(-0.25, -0.55, n.y).mul(isBody);
   const belt = mix(float(bd.y), float(bc.y), clamp(p.z.sub(cab.deck).div(cab.cowl - cab.deck), 0.0, 1.0));
+  const ndv = clamp(dot(normalView, positionViewDirection), 0.0, 1.0);
+  const fresnel = pow(one.sub(ndv), 3.2);
 
-  // Glasshouse: side windows (minus the B / C pillars), windshield & backlight, their black seals, chrome sill strip
-  let sideG = polygonDistance(p.z, p.y, sideGlassPlanes, 0.07);
-  for (const zp of cab.pillars) sideG = max(sideG, float(0.036).sub(abs(p.z.sub(zp))));
-  const rearGlass = coverage(polygonDistance(ax, p.z, rearGlassPlanes, 0.09));
-  const backlight = rearGlass.mul(isWindow);
-  const glass = max(max(coverage(sideG), coverage(polygonDistance(ax, p.z, frontGlassPlanes, 0.09))), rearGlass)
-    .mul(isWindow);
-  const seal = max(
-    coverage(polygonDistance(p.z, p.y, sideSealPlanes, 0.07)),
-    max(coverage(polygonDistance(ax, p.z, frontSealPlanes, 0.09)), coverage(polygonDistance(ax, p.z, rearSealPlanes, 0.09)))
-  ).mul(isWindow);
-  const chromeBelt = spec.chrome
-    ? smoothstep(0.003, 0.006, p.y.sub(belt))
-      .mul(smoothstep(0.016, 0.012, p.y.sub(belt)))
-      .mul(smoothstep(0.5, 0.7, abs(n.x)))
-      .mul(step(cab.deck + 0.05, p.z))
-      .mul(step(p.z, cab.cowl - 0.08))
-      .mul(isWindow)
-    : float(0.0);
-  const chmsl = roundedRect(vec2(p.x, p.z.sub(cab.roofRear - 0.075)), vec2(0.14, 0.012), 0.005).mul(backlight).mul(step(n.z, -0.1));
-  const rearWiper = spec.rearWiper
-    ? roundedRect(vec2(p.x.add(0.15), p.z.sub(cab.deck + 0.075)), vec2(0.22, 0.006), 0.003).mul(backlight)
-    : float(0.0);
+  // Per-axis screen footprint of the object-space position, taken outside the branches (derivatives need uniform
+  // control flow). Every edge and sub-pixel fade uses the footprint across itself: on a side seen at a grazing angle
+  // z is foreshortened but y is not, so horizontal lines stay sharp while door seams soften (anisotropic filtering).
+  const fwp = max(fwidth(p), vec3(0.0005)).toVar();
+  const fwX = fwp.x;
+  const fwY = fwp.y;
+  const fwZ = fwp.z;
+  const fwXY = vec2(fwX, fwY);
+  const fwXZ = vec2(fwX, fwZ);
+  const fwZY = vec2(fwZ, fwY);
+  const fadeFine = (w) => smoothstep(0.018, 0.005, w);
+  const fadeMed = (w) => smoothstep(0.042, 0.012, w);
+  // Edges ramp over one footprint (crisp but anti-aliased); bands |d| < h are box-filtered exactly, so thin lines
+  // narrow and lighten smoothly below a pixel instead of being faded out. Only periodic patterns need the fades.
+  const cov = (d, w) => smoothstep(w.mul(0.5), w.mul(-0.5), d);
+  const band = (d, h, w) => clamp(min(d.add(h), w.mul(0.5)).sub(max(d.sub(h), w.mul(-0.5))).div(w), 0.0, 1.0);
+  // Rounded-rect distance and the footprint across its nearest edge (the box's dominant axis), from the per-axis
+  // footprints of its two coordinates
+  const rrectEdge = (pt, hs, rad, fw2) => {
+    const q = abs(pt).sub(hs).add(rad);
+    return { d: length(max(q, vec2(0.0))).add(min(max(q.x, q.y), 0.0)).sub(rad), w: mix(fw2.y, fw2.x, step(q.y, q.x)) };
+  };
+  const rrect = (pt, hs, rad, fw2) => {
+    const e = rrectEdge(pt, hs, rad, fw2);
+    return cov(e.d, e.w);
+  };
+  // Footprint across the edge of max(a, b) / min(a, b) of two 1D distances with footprints wa, wb
+  const maxEdgeW = (a, b, wa, wb) => mix(wa, wb, step(a, b));
+  const minEdgeW = (a, b, wa, wb) => mix(wa, wb, step(b, a));
+
+  const isPolice = fixed ? float(0.0) : isLivery(1.0);
+  const isBoro = fixed ? float(0.0) : isLivery(2.0);
+  const isTLC = fixed ? float(0.0) : isLivery(3.0);
+  const isTwoTone = fixed ? float(0.0) : max(isLivery(4.0), step(abs(trimCode.sub(3.0)), 0.25));
+  const isBlackout = step(abs(trimCode.sub(2.0)), 0.25);
+  const hasChrome = max(float(spec.chrome ? 1.0 : 0.0), step(abs(trimCode.sub(1.0)), 0.25)).mul(one.sub(isBlackout));
 
   // Wheel arches: distance from the nearest axle in side view (or from the hub of a centred, spinning wheel)
   const isCenteredWheel = step(abs(p.z), wheelR.add(0.05)).mul(max(isTyre, isAlloy));
   const wheelVec = mix(vec2(abs(p.z).sub(axleZ), p.y.sub(wheelR)), vec2(p.z, p.y), isCenteredWheel);
   const wheelDist = length(wheelVec);
+  const rNorm = wheelDist.div(wheelR);
+  // Footprints across the wheel's rings (radial) and spokes (tangential) in the (z, y) wheel plane
+  const wheelDir = wheelVec.div(max(wheelDist, 0.0001));
+  const fwRing = abs(wheelDir.x).mul(fwZ).add(abs(wheelDir.y).mul(fwY));
+  const fwSpoke = abs(wheelDir.y).mul(fwZ).add(abs(wheelDir.x).mul(fwY));
+  const proxyAlloy = isTyre.mul(cov(rNorm.sub(0.60).mul(wheelR), fwRing)).mul(smoothstep(0.68, 0.82, abs(n.x)));
+  const isAlloyFace = max(isAlloy, proxyAlloy);
+  const isTyreRubber = isTyre.sub(proxyAlloy);
 
-  // Lamps, grilles & plates on the nose and tail (projected along z, so the lamps wrap around the corners)
-  const hlUV = vec2(ax.sub(hlX), p.y.sub(hlY));
-  const headlight = roundedRect(hlUV, vec2(hlW, hlH), 0.01).mul(smoothstep(0.02, 0.25, n.z)).mul(step(frontZone, p.z)).mul(isBody);
-  const turnFront = smoothstep(hlX + hlW * 0.65, hlX + hlW * 0.72, ax).mul(headlight);
-  const divider = smoothstep(max(fwidth(ax), 0.007), 0.002, abs(hlUV.x.add(hlW * 0.1)));
-  const headlightLens = roundedRect(hlUV, vec2(hlW - 0.012, hlH - 0.012), 0.006)
-    .mul(headlight).mul(one.sub(max(divider, turnFront)));
-  const drlDist = abs(hlUV.y.add(hlH * 0.6));
-  const drlEdge = max(fwidth(drlDist), 0.006);
-  const drl = smoothstep(drlEdge, 0.0, drlDist).mul(headlight).mul(one.sub(turnFront));
-  const grille = roundedRect(vec2(p.x, p.y.sub(grY)), vec2(grW, grH), 0.015).mul(front);
-  const intake = roundedRect(vec2(p.x, p.y.sub(inY)), vec2(inW, inH), 0.04).mul(front);
-  const plateFront = roundedRect(vec2(p.x, p.y.sub(plateF)), vec2(0.155, 0.055), 0.008).mul(front);
-  const tlUV = vec2(ax.sub(tlX), p.y.sub(tlY));
-  const taillight = roundedRect(tlUV, vec2(tlW, tlH), 0.022)
-    .mul(smoothstep(0.02, 0.25, n.z.negate()))
-    .mul(step(p.z, rearZone))
-    .mul(isBody);
-  // Sedans use horizontal lenses; taller SUV lamps stack their three sections vertically.
-  const tailAxis = tlH > tlW ? tlUV.y.div(tlH) : tlUV.x.div(tlW);
-  const tailDivider = coverage(min(abs(tailAxis.sub(0.52)), abs(tailAxis.add(0.55))).sub(0.025));
-  const tailLens = roundedRect(tlUV, vec2(tlW - 0.006, tlH - 0.006), 0.017)
-    .mul(taillight).mul(one.sub(tailDivider));
-  const turnRearSection = smoothstep(0.50, 0.54, tailAxis);
-  const reverseRearSection = smoothstep(-0.53, -0.57, tailAxis);
-  const turnRear = turnRearSection.mul(tailLens);
-  const redLens = tailLens.mul(one.sub(max(turnRearSection, reverseRearSection)));
-  const plateRear = roundedRect(vec2(p.x, p.y.sub(plateR)), vec2(0.155, 0.06), 0.008).mul(rear);
-  const platePocket = roundedRect(vec2(p.x, p.y.sub(plateR + 0.01)), vec2(0.235, 0.105), 0.03).mul(rear);
-  const trunkHandle = roundedRect(vec2(p.x, p.y.sub(plateR + 0.125)), vec2(0.18, 0.012), 0.008).mul(rear);
-  const plateRecess = max(
-    roundedRect(vec2(p.x, p.y.sub(plateF)), vec2(0.175, 0.072), 0.012).mul(front),
-    roundedRect(vec2(p.x, p.y.sub(plateR)), vec2(0.185, 0.082), 0.02).mul(rear)
-  );
-  const rearValance = smoothstep(rearSill + 0.07, rearSill + 0.015, p.y).mul(rear);
-  const reflector = roundedRect(vec2(ax.sub(0.64), p.y.sub(spec.bumpers[1][0] + 0.065)), vec2(0.065, 0.012), 0.006).mul(rear);
-  const trunkWidth = mix(float(tlX - tlW - 0.025), float(tlX), smoothstep(tlY - tlH, spec.tail.edge[1], p.y));
-  const trunkEdge = max(ax.sub(trunkWidth), float(spec.bumperLine[1]).sub(p.y));
-  const panelSeam = max(
-    smoothstep(0.006, 0.0025, abs(p.y.sub(spec.bumperLine[0]))).mul(step(ax, hlX - hlW * 0.6)).mul(front),
-    coverage(abs(trunkEdge).sub(0.003)).mul(rear)
-  );
-  const cowlPanel = smoothstep(cab.cowl + 0.085, cab.cowl + 0.07, p.z)
-    .mul(smoothstep(cab.cowl - 0.04, cab.cowl - 0.02, p.z))
-    .mul(step(0.6, n.y))
-    .mul(isBody);
-  const signFace = smoothstep(0.55, 0.75, abs(n.z)).mul(isSign);
-  const signGlyph = step(0.42, sin(p.x.mul(90.0))).mul(step(ax, 0.17)).mul(smoothstep(0.045, 0.04, abs(p.y.sub(signY))));
-  const mirrorGlass = isMirror.mul(step(0.55, n.z.negate()));
-  const lamp = max(headlight, taillight);
-  const plates = max(plateFront, plateRear);
-  const cladding =
-    spec.cladding > 0
-      ? max(smoothstep(spec.cladding + 0.01, spec.cladding - 0.01, p.y), smoothstep(archR + 0.075, archR + 0.06, wheelDist))
-        .mul(isBody)
-        .mul(one.sub(lamp))
-        .mul(one.sub(plates))
-      : float(0.0);
-
-  // 5-spoke alloys (branchless 5-ray star SDF) with rim ring & hub, lug ribs on the tyre tread
-  const wDir = wheelVec.div(max(wheelDist, 0.0001));
-  let spokes = float(0.0);
-  for (let k = 0; k < 5; k++) {
-    const ang = (k * Math.PI * 2) / 5;
-    const cs = Math.cos(ang);
-    const sn = Math.sin(ang);
-    const alongSpoke = wDir.x.mul(cs).add(wDir.y.mul(sn));
-    const perp = abs(wDir.x.mul(sn).sub(wDir.y.mul(cs))).mul(wheelDist);
-    spokes = max(spokes, smoothstep(0.034, 0.018, perp).mul(step(0.0, alongSpoke)));
-  }
-  const rimRing = smoothstep(wheelR.mul(0.56), wheelR.mul(0.6), wheelDist);
-  const centerHub = smoothstep(0.068, 0.042, wheelDist);
-  const centerCap = smoothstep(0.03, 0.018, wheelDist);
-  const valveDot = smoothstep(0.028, 0.014, length(wheelVec.sub(vec2(0.0, wheelR.mul(-0.48)))));
-  const alloyMetal = clamp(max(max(spokes, valveDot), max(rimRing, centerHub)).sub(centerCap.mul(0.85)), 0.0, 1.0);
-
-  // Black plastic & rubber (grilles, seals, trims, tyres, cladding) is matte; lamps, glass & chrome are glossy
-  const matte = max(
-    max(max(isTyre, isTrim), max(intake, grille)),
-    max(max(rearValance, under), max(max(cowlPanel, cladding), max(rearWiper, seal.mul(one.sub(max(glass, chromeBelt))))))
-  );
-
-  // ---- Colour ---------------------------------------------------------------------------------------------------
-  // Liveries: NYPD (white with blue & light-blue side stripes, lettering on the front doors); the taxi's door badges
-  // and medallion number
-  const isPolice = (fixed ? float(0) : step(0.5, state.w)).mul(isSide).mul(isBody);
-  const doorMid = (spec.doors[0] + spec.doors[1]) / 2;
-  const along = smoothstep(spec.zRear + 0.22, spec.zRear + 0.3, p.z).mul(smoothstep(spec.zFront - 0.28, spec.zFront - 0.36, p.z));
-  const band = smoothstep(0.495, 0.5, p.y).mul(smoothstep(0.645, 0.64, p.y)).mul(along);
-  const pin = smoothstep(0.663, 0.667, p.y).mul(smoothstep(0.687, 0.683, p.y)).mul(along);
-  const lettering = step(0.45, sin(p.z.mul(70.0)))
-    .mul(smoothstep(0.725, 0.73, p.y))
-    .mul(smoothstep(0.81, 0.805, p.y))
-    .mul(step(abs(p.z.sub(doorMid)), 0.22));
-  let painted = mix(mix(paint, color(0x1d3f8f), max(band, lettering).mul(isPolice)), color(0x6fa8dc), pin.mul(isPolice));
-  if (spec.sign) {
-    const badge = roundedRect(vec2(p.z.sub(doorMid), p.y.sub(0.66)), vec2(0.21, 0.052), 0.012).mul(isSide).mul(isBody);
-    const emblem = smoothstep(0.042, 0.036, length(vec2(abs(p.z.sub(doorMid)).sub(0.15), p.y.sub(0.66))));
-    const letters = step(0.35, sin(p.z.mul(95.0)))
-      .mul(step(abs(p.z.sub(doorMid)), 0.1))
-      .mul(smoothstep(0.03, 0.026, abs(p.y.sub(0.66))));
-    const medallion = step(0.3, sin(p.z.mul(150.0)))
-      .mul(step(abs(p.z.sub(spec.zRear + 0.6)), 0.075))
-      .mul(smoothstep(0.016, 0.013, abs(p.y.sub(0.8))))
-      .mul(isSide)
-      .mul(isBody);
-    painted = mix(mix(painted, color(0x121417), badge), color(0xffbe14), max(emblem, letters).mul(badge));
-    painted = mix(painted, color(0x121417), medallion);
-  }
-
-  // Panel shading: soft occlusion low down & under the arch lips; unpainted cladding (SUVs); door shut lines &
-  // handles; trunk / hood shut lines; black cowl panel under the windshield
+  const paintLuma = dot(paint, vec3(0.299, 0.587, 0.114));
+  const whiteComp = mix(float(0.98), float(0.84), smoothstep(0.60, 0.92, paintLuma));
+  const paintFlop = mix(one, ndv.mul(0.22).add(0.82), isMetallic);
+  const basePaint = paint.mul(whiteComp).mul(paintFlop);
   const archLip = smoothstep(archR + 0.05, archR - 0.005, wheelDist).mul(smoothstep(0.6, 0.9, ax));
-  const ao = smoothstep(0.2, 0.62, p.y).mul(0.22).add(0.78).mul(one.sub(archLip.mul(0.55)));
-  const onDoors = isSide.mul(smoothstep(sillY + 0.04, sillY + 0.07, p.y)).mul(smoothstep(0.0, -0.015, p.y.sub(belt)));
-  let seams = float(0.0);
-  for (const zd of spec.doors) seams = max(seams, smoothstep(0.009, 0.003, abs(p.z.sub(zd))));
-  for (const zh of spec.handles) {
-    seams = max(seams, roundedRect(vec2(p.z.sub(zh), p.y.sub(belt.sub(0.095))), vec2(0.06, 0.011), 0.008));
-  }
-  let body = mix(painted.mul(ao), color(0x1e2124), cladding);
-  body = body.mul(one.sub(seams.mul(onDoors).mul(0.55))).mul(one.sub(panelSeam.mul(0.5)));
-  body = mix(body, color(0x15181b), cowlPanel);
+  const ao = smoothstep(0.22, 0.66, p.y).mul(0.2).add(0.8).mul(one.sub(archLip.mul(0.55)));
+  const tlSize = vec2(tlW * 1.04, tlH * 1.2);
 
-  // Nose: slatted grilles and broad divided reflectors inside squared lamp housings, with outer amber indicators.
-  const slats = step(0.5, fract(p.y.mul(42.0))).mul(0.4).add(0.6);
-  body = mix(body, color(0x111417).mul(slats), max(intake, grille));
-  const lensShade = smoothstep(0.0, hlH, abs(hlUV.y)).mul(0.35).add(0.65);
-  const lampColor = mix(mix(color(0x30383e), color(0xc2ccd2).mul(lensShade), headlightLens), color(0xe4e9eb), drl);
-  body = mix(body, mix(lampColor, color(0xc5802b), turnFront), headlight);
-  // Tail: thin rubber seals around divided red, amber and clear lenses.
-  const tailShade = smoothstep(0.0, tlH, abs(tlUV.y)).mul(-0.3).add(1.0);
-  const tailColor = mix(mix(color(0xae1821).mul(tailShade), color(0xc56b18), turnRearSection), color(0xbac4c9), reverseRearSection);
-  body = mix(body, color(0x15181b), rearValance);
-  body = mix(body, color(0x7a0a10), reflector);
-  body = mix(body, color(0x222326), taillight);
-  body = mix(body, tailColor, tailLens);
-  // Shaded recess and handle sit in the painted trunk / hatch, above the bumper.
-  const pocketShade = smoothstep(plateR - 0.09, plateR + 0.115, p.y).mul(-0.25).add(0.9);
-  body = mix(body, body.mul(pocketShade), platePocket);
-  body = mix(body, color(0x303438), trunkHandle);
-  body = mix(body, color(0x24292d), plateRecess);
-  body = mix(body, color(0xf2b718), plates);
-  const plateVariant = floor(fract(paint.r.mul(7).add(paint.g.mul(13)).add(paint.b.mul(17))).mul(4));
-  const plateUV = vec2(p.x.div(-0.31).add(0.5), p.y.sub(plateR).div(0.12).add(0.5));
-  const plateColor = texture(carPlateTexture(), vec2(plateUV.x, plateUV.y.add(plateVariant).div(4))).rgb;
-  body = mix(body, plateColor, plateRear);
-  body = mix(body, color(0x0e1013), under);
+  // Shared glasshouse polygon evaluation (used by colorNode, roughnessNode & metalnessNode on CAR_PARTS.WINDOW only)
+  const evalWindowGlass = () => {
+    const side = polygonEdge(p.z, p.y, sideGlassPlanes, 0.065, fwZ, fwY);
+    let dSideG = side.d;
+    let wSideG = side.w;
+    const pillarCut = (zp, halfWidth) => {
+      const e = float(halfWidth).sub(abs(p.z.sub(zp)));
+      wSideG = maxEdgeW(dSideG, e, wSideG, fwZ);
+      dSideG = max(dSideG, e);
+    };
+    for (const zp of cab.pillars) pillarCut(zp, 0.038);
+    if (cab.pillars.length === 1) pillarCut(cab.roofRear - 0.04, 0.014);
+    const front = polygonEdge(ax, p.z, frontGlassPlanes, 0.085, fwX, fwZ);
+    const sideGlass = cov(dSideG, wSideG);
+    const frontGlass = cov(front.d, front.w);
+    const rear = spec.cargo ? null : polygonEdge(ax, p.z, rearGlassPlanes, 0.085, fwX, fwZ);
+    const rearGlass = rear ? cov(rear.d, rear.w) : float(0.0);
+    const glass = max(max(sideGlass, frontGlass), rearGlass);
+    // The seal follows the nearest outline, filtered across that outline
+    let dSeal = side.d;
+    let wSeal = side.w;
+    for (const o of rear ? [front, rear] : [front]) {
+      wSeal = minEdgeW(dSeal, o.d, wSeal, o.w);
+      dSeal = min(dSeal, o.d);
+    }
+    const seal = cov(dSeal.sub(0.016), wSeal);
+    return { glass, frontGlass, rearGlass, seal };
+  };
 
-  // Glasshouse: tinted glass, black seals & B / C pillars, painted roof & A pillars, chrome sill strip, CHMSL
-  const glassCol = mix(color(0x0a1016), color(0x1a2632), smoothstep(0.2, 0.9, n.y));
-  let windowCol = mix(mix(mix(mix(paint, color(0x111315), seal), glassCol, glass), color(0xc9ced3), chromeBelt), color(0x6a0a0e), chmsl);
-  windowCol = mix(windowCol, color(0x15181b), rearWiper);
+  // Lamp, roof-sign & CHMSL masks shared by the colour and emissive graphs (each evaluates them in its own branch)
+  const headlightMasks = () => {
+    const hlUV = vec2(ax.sub(hlX), p.y.sub(hlY).sub(ax.sub(hlX).mul(0.032)));
+    const headlight = rrect(hlUV, vec2(hlW, hlH), 0.014, fwXY).mul(smoothstep(0.02, 0.25, n.z));
+    const turnFront = smoothstep(hlW * 0.76, hlW * 0.83, hlUV.x).mul(headlight);
+    const lit = headlight.mul(one.sub(turnFront));
+    const projUV = vec2(abs(hlUV.x.add(hlW * 0.09)).sub(hlW * 0.25), hlUV.y.sub(hlH * 0.08));
+    const proj = rrectEdge(projUV, vec2(hlW * 0.165, hlH * 0.44), 0.009, fwXY);
+    const drlH = max(abs(hlUV.y.add(hlH * 0.60)), max(hlUV.x.sub(hlW * 0.67), float(-hlW * 0.82).sub(hlUV.x)));
+    const drlV = max(abs(hlUV.x.sub(hlW * 0.67)), max(hlUV.y.sub(hlH * 0.48), float(-hlH * 0.60).sub(hlUV.y)));
+    return {
+      headlight,
+      turnFront,
+      projBucket: cov(proj.d.sub(0.008), proj.w).mul(lit),
+      projRing: cov(proj.d.sub(0.002), proj.w).mul(lit),
+      headlightLens: cov(proj.d.add(0.004), proj.w).mul(lit),
+      drl: cov(min(drlH, drlV).sub(0.0045), minEdgeW(drlH, drlV, fwY, fwX)).mul(lit)
+    };
+  };
+  const taillightMasks = () => {
+    const tlUV = vec2(ax.sub(tlX), p.y.sub(tlY));
+    const tail = rrectEdge(tlUV, tlSize, 0.018, fwXY);
+    const taillight = cov(tail.d, tail.w).mul(smoothstep(0.02, 0.25, n.z.negate()));
+    const lowerStrip = smoothstep(-tlH * 0.12, -tlH * 0.24, tlUV.y);
+    return {
+      tlUV,
+      taillight,
+      tailLens: cov(tail.d.add(0.0045), tail.w).mul(taillight),
+      turnRearSection: lowerStrip.mul(smoothstep(0.0, tlW * 0.08, tlUV.x)),
+      reverseRearSection: lowerStrip.mul(smoothstep(tlW * 0.04, -tlW * 0.04, tlUV.x)),
+      ledBar: max(band(tlUV.y.sub(tlH * 0.36), 0.0085, fwY), band(tlUV.y.add(tlH * 0.02), 0.0085, fwY))
+    };
+  };
+  const signGlyphMask = () => smoothstep(0.25, 0.58, sin(p.x.mul(90.0)))
+    .mul(band(p.x, 0.17, fwX))
+    .mul(band(p.y.sub(signY), 0.042, fwY))
+    .mul(fadeFine(fwX));
+  const chmslMask = (rearGlass) => spec.barnDoors
+    ? rrect(vec2(p.x, p.y.sub(spec.barnDoors[1] + 0.055)), vec2(0.16, 0.015), 0.005, fwXY)
+        .mul(smoothstep(-0.15, -0.45, n.z))
+        .mul(smoothstep(rearZone + 0.05, rearZone - 0.05, p.z))
+    : rrect(vec2(p.x, p.z.sub(cab.roofRear - 0.075)), vec2(0.16, 0.011), 0.005, fwXZ)
+        .mul(rearGlass())
+        .mul(smoothstep(-0.05, -0.2, n.z));
 
-  // Mirror caps (paint, glass facing back), taxi roof light, trims, alloys & tyres
-  const mirrorCol = mix(paint, color(0x7c8a94), mirrorGlass);
-  const signCol = mix(color(0xf3efe2), mix(color(0xfff1b8), color(0x15181b), signGlyph), signFace);
-  const alloyCol = mix(color(0x0b0e12), color(0xd8e0e8), alloyMetal);
-  const treadZone = smoothstep(wheelR.mul(0.74), wheelR.mul(0.83), wheelDist);
-  const tyreBase = smoothstep(wheelR.mul(0.85), wheelR.mul(0.94), wheelDist).mul(0.22).add(0.78);
-  const tyreCol = color(0x16181b).mul(tyreBase.add(spokes.mul(treadZone).mul(0.24)));
+  // ---- Colour (per-part If branches so each fragment only evaluates its own part's masks) ---------------------------
+  const colorFn = Fn(() => {
+    const outCol = vec3(color(0x181b1f)).toVar();
 
-  let col = mix(body, windowCol, isWindow);
-  col = mix(col, mirrorCol, isMirror);
-  col = mix(col, signCol, isSign);
-  col = mix(col, color(0x1b1e21), isTrim);
-  col = mix(col, alloyCol, isAlloy);
-  col = mix(col, tyreCol, isTyre);
+    // Sample plate texture outside If() so hardware mipmaps + anisotropy filter cleanly without derivative issues
+    const plateVariant = floor(fract(paint.r.mul(7).add(paint.g.mul(13)).add(paint.b.mul(17)).add(isTLC.mul(0.75))).mul(4));
+    const isFrontSide = smoothstep(-0.02, 0.02, n.z);
+    const plateSignX = mix(float(-0.31), float(0.31), isFrontSide);
+    const plateCenterY = mix(float(plateR), float(plateF), isFrontSide);
+    const plateUV = vec2(
+      clamp(p.x.div(plateSignX).add(0.5), 0.02, 0.98),
+      clamp(p.y.sub(plateCenterY).div(0.115).add(0.5), 0.06, 0.94).add(plateVariant).div(4.0)
+    );
+    const plateCol = texture(carPlateTexture(), plateUV).rgb;
 
-  // ---- Roughness & metalness ---------------------------------------------------------------------------------------
-  const alloySpokes = max(spokes, rimRing).mul(isAlloy);
-  const glossy = max(max(max(glass, chromeBelt), mirrorGlass), lamp);
-  let rough = mix(float(0.26), float(0.15), glossy);
-  rough = mix(rough, float(0.4), plates);
-  rough = mix(rough, float(0.35), isSign);
-  rough = mix(rough, float(0.82), max(matte, isAlloy.sub(alloySpokes)));
+    If(isBody.greaterThan(0.5), () => {
+      const bCol = vec3(basePaint.mul(ao)).toVar();
+      if (spec.cladding > 0) {
+        const clad = max(smoothstep(spec.cladding + 0.01, spec.cladding - 0.01, p.y), smoothstep(archR + 0.068, archR + 0.052, wheelDist));
+        bCol.assign(mix(bCol, color(0x1d2024), clad));
+      }
+      if (spec.bedCover) {
+        const bedTop = cov(p.z.sub(cab.deck - 0.01), fwZ).mul(cov(float(spec.zRear + 0.08).sub(p.z), fwZ)).mul(smoothstep(0.68, 0.85, n.y)).mul(cov(ax.sub(0.88), fwX));
+        bCol.assign(mix(bCol, color(0x16191d), bedTop));
+      }
+      const grime = smoothstep(sillY + 0.16, sillY - 0.01, p.y).mul(0.2);
+      bCol.assign(mix(bCol, color(0x2d2b28), grime));
 
-  let metal = mix(float(0.34), float(0.14), glass);
-  metal = mix(metal, float(0.6), max(lamp, mirrorGlass));
-  metal = mix(metal, float(0.95), chromeBelt);
-  metal = mix(metal, float(0.86), alloySpokes);
-  metal = mix(metal, float(0.08), plates);
-  metal = mix(metal, float(0.04), max(matte, isSign));
+      // Side doors, handles & liveries (evaluated only on side-facing body fragments)
+      If(isSide.greaterThan(0.05), () => {
+        const hasLivery = max(isPolice, max(isBoro, float(spec.sign ? 1.0 : 0.0)));
+        If(hasLivery.greaterThan(0.5), () => {
+          const along = smoothstep(spec.zRear + 0.22, spec.zRear + 0.3, p.z).mul(smoothstep(spec.zFront - 0.28, spec.zFront - 0.36, p.z));
+          const stripe = band(p.y.sub(0.57), 0.072, fwY).mul(along);
+          const pin = band(p.y.sub(0.675), 0.011, fwY).mul(along);
+          const letterPattern = mix(float(0.35), smoothstep(0.2, 0.55, sin(p.z.mul(72.0))), fadeFine(fwZ));
+          const lettering = letterPattern
+            .mul(band(p.y.sub(0.765), 0.042, fwY))
+            .mul(band(p.z.sub(doorMid), 0.24, fwZ));
+          const polMask = isPolice.mul(isSide).mul(ao);
+          bCol.assign(mix(mix(bCol, color(0x1b3d8a), max(stripe, lettering).mul(polMask)), color(0x6ba5dc), pin.mul(polMask)));
 
-  // ---- Emissive: running, brake, reverse & turn lights, CHMSL, taxi roof light -----------------------------------
+          const hasTaxiBadge = max(float(spec.sign ? 1.0 : 0.0), isBoro).mul(isSide);
+          const badge = rrect(vec2(p.z.sub(doorMid), p.y.sub(0.66)), vec2(0.21, 0.052), 0.012, fwZY).mul(hasTaxiBadge);
+          const emblemUV = vec2(abs(p.z.sub(doorMid)).sub(0.15), p.y.sub(0.66));
+          const emblemLen = length(emblemUV);
+          const emblemW = abs(emblemUV.x).mul(fwZ).add(abs(emblemUV.y).mul(fwY)).div(max(emblemLen, 0.0001));
+          const emblem = cov(emblemLen.sub(0.039), emblemW);
+          const letters = mix(float(0.4), smoothstep(0.15, 0.55, sin(p.z.mul(95.0))), fadeFine(fwZ))
+            .mul(band(p.z.sub(doorMid), 0.1, fwZ))
+            .mul(band(p.y.sub(0.66), 0.028, fwY));
+          const badgeFg = mix(color(0xffbe14), color(0xeaf4e6), isBoro).mul(ao);
+          bCol.assign(mix(mix(bCol, color(0x121417), badge), badgeFg, max(emblem, letters).mul(badge)));
+        });
+
+        const frontOfSlide = spec.slidingDoor ? smoothstep(spec.slidingDoor[0] + 0.02, spec.slidingDoor[0] + 0.06, p.z) : one;
+        const sideDoorMask = spec.slidingDoor ? max(frontOfSlide, step(p.x, 0.0)) : one;
+        const topDoorFade = spec.slidingDoor ? mix(one, smoothstep(0.0, -0.015, p.y.sub(belt)), frontOfSlide) : smoothstep(0.0, -0.015, p.y.sub(belt));
+        const onDoors = isSide.mul(smoothstep(sillY + 0.04, sillY + 0.07, p.y)).mul(topDoorFade).mul(sideDoorMask);
+        let seams = float(0.0);
+        for (const zd of spec.doors) seams = max(seams, band(p.z.sub(zd), 0.0035, fwZ));
+        let hDistZ = abs(p.z.sub(spec.handles[0]));
+        for (let i = 1; i < spec.handles.length; i++) hDistZ = min(hDistZ, abs(p.z.sub(spec.handles[i])));
+        const hUV = vec2(hDistZ, p.y.sub(belt.sub(0.092)));
+        const handle = rrectEdge(hUV, vec2(0.066, 0.0085), 0.005, fwZY);
+        const handleBar = cov(handle.d, handle.w).mul(onDoors);
+        const pocket = rrectEdge(vec2(hDistZ, hUV.y.add(0.002)), vec2(0.028, 0.015), 0.009, fwZY);
+        const handlePocket = cov(pocket.d.sub(0.004), pocket.w)
+          .mul(one.sub(handleBar))
+          .mul(onDoors);
+        bCol.assign(bCol.mul(one.sub(seams.mul(onDoors).mul(0.58))).mul(one.sub(handlePocket.mul(0.68))));
+        bCol.assign(mix(bCol, mix(bCol.mul(1.12), color(0xd8dfe6), hasChrome.mul(0.75)), handleBar));
+        if (spec.slidingDoor) {
+          const sdRear = spec.slidingDoor[1];
+          const slideTrack = rrect(vec2(p.z.sub(sdRear - 0.42), p.y.sub(belt.sub(0.048))), vec2(0.42, 0.009), 0.004, fwZY)
+            .mul(step(p.x, 0.0))
+            .mul(isSide);
+          bCol.assign(mix(bCol, color(0x121519), slideTrack));
+        }
+      });
+
+      // Front fascia: headlamps, honeycomb grille, lower intake, air curtains & front NY license plate
+      If(p.z.greaterThan(frontZone).and(n.z.greaterThan(0.02)), () => {
+        const front = smoothstep(0.12, 0.38, n.z);
+        const hoodSeam = band(p.y.sub(spec.bumperLine[0]), 0.0035, fwY)
+          .mul(cov(ax.sub(hlX - hlW * 0.5), fwX))
+          .mul(front);
+        bCol.assign(bCol.mul(one.sub(hoodSeam.mul(0.52))));
+
+        const g = rrectEdge(vec2(p.x, p.y.sub(grY)), vec2(grW, grH), 0.015, fwXY);
+        const grille = cov(g.d, g.w).mul(front);
+        const grilleOuter = cov(g.d.sub(0.013), g.w).mul(front);
+        const grilleWing = band(p.y.sub(grY + grH * 0.12), 0.0045, fwY).mul(grille);
+        const grilleFrame = max(grilleOuter.sub(grille), grilleWing.mul(0.75));
+        const emblemFront = rrect(vec2(p.x, p.y.sub(grY + grH * 0.12)), vec2(0.032, 0.015), 0.008, fwXY).mul(grille);
+        const intake = rrect(vec2(p.x, p.y.sub(inY)), vec2(inW, inH), 0.032, fwXY).mul(front);
+        const airCurtain = rrect(vec2(ax.sub(hlX + hlW * 0.42), p.y.sub(inY + 0.03)), vec2(0.042, inH * 0.85), 0.014, fwXY).mul(front);
+        const meshWave = smoothstep(-0.1, 0.35, sin(p.x.add(p.y).mul(110.0)).mul(sin(p.x.sub(p.y).mul(110.0))));
+        const meshPattern = mix(float(0.68), meshWave.mul(0.38).add(0.52), fadeFine(max(fwX, fwY)));
+        const slatWave = smoothstep(0.3, 0.6, fract(p.y.mul(52.0)));
+        const intakeSlats = mix(float(0.72), slatWave.mul(0.35).add(0.55), fadeFine(fwY));
+        const frameCol = mix(color(0x181b20), color(0xd2d8de), hasChrome);
+        bCol.assign(mix(bCol, frameCol, grilleFrame));
+        bCol.assign(mix(bCol, color(0x101317).mul(meshPattern), grille.mul(one.sub(grilleWing))));
+        bCol.assign(mix(bCol, color(0xd4dbe2), emblemFront));
+        bCol.assign(mix(bCol, color(0x0f1216).mul(intakeSlats), max(intake, airCurtain)));
+
+        const { headlight, turnFront, projBucket, projRing, headlightLens, drl } = headlightMasks();
+        const lampBezel = mix(mix(color(0x13171d), color(0x4a535e), projBucket), color(0x9ea8b2), projRing.mul(0.78));
+        const lampColor = mix(mix(lampBezel, color(0xf4f8ff), headlightLens), color(0xffffff), drl);
+        bCol.assign(mix(bCol, mix(lampColor, color(0xb85e16), turnFront), headlight));
+
+        const frontPlateEdge = rrectEdge(vec2(p.x, p.y.sub(plateF)), vec2(0.155, 0.055), 0.008, fwXY);
+        const plateRecessF = cov(frontPlateEdge.d.sub(0.015), frontPlateEdge.w).mul(front);
+        const plateFront = cov(frontPlateEdge.d, frontPlateEdge.w).mul(front);
+        bCol.assign(mix(bCol, color(0x1e2227), plateRecessF));
+        bCol.assign(mix(bCol, plateCol, plateFront));
+      }).ElseIf(p.z.lessThan(rearZone).and(n.z.lessThan(-0.02)), () => {
+        // Rear fascia: wraparound tail lamps, diffuser, exhausts & rear NY license plate
+        const rear = smoothstep(0.12, 0.38, n.z.negate());
+        const rearPlateEdge = rrectEdge(vec2(p.x, p.y.sub(plateR)), vec2(0.155, 0.06), 0.008, fwXY);
+        const platePocket = rrect(vec2(p.x, p.y.sub(plateR + 0.01)), vec2(0.24, 0.105), 0.03, fwXY).mul(rear);
+        let trunkSeam;
+        if (spec.barnDoors) {
+          const [barnW] = spec.barnDoors;
+          const barnSide = ax.sub(barnW);
+          const barnBottom = float(trunkBot).sub(p.y);
+          const barnEdgeW = maxEdgeW(barnBottom, barnSide, fwY, fwX);
+          const barnOutline = band(max(barnSide, barnBottom), 0.0035, barnEdgeW);
+          const barnSplit = band(p.x, 0.0045, fwX).mul(cov(barnBottom, fwY));
+          trunkSeam = max(barnOutline, barnSplit).mul(rear).mul(one.sub(platePocket));
+        } else {
+          const trunkWidth = mix(float(tlX - tlW - 0.025), float(tlX), smoothstep(tlY - tlH, spec.tail.edge[1], p.y));
+          const trunkSide = ax.sub(trunkWidth);
+          const trunkBottom = float(trunkBot).sub(p.y);
+          const trunkW = maxEdgeW(trunkBottom, trunkSide, fwY, fwX);
+          trunkSeam = band(max(trunkSide, trunkBottom), 0.003, trunkW).mul(rear).mul(one.sub(platePocket));
+        }
+        bCol.assign(bCol.mul(one.sub(trunkSeam.mul(0.56))));
+
+        const pocketShade = smoothstep(plateR - 0.09, plateR + 0.115, p.y).mul(-0.25).add(0.9);
+        bCol.assign(mix(bCol, bCol.mul(pocketShade), platePocket));
+
+        const { tlUV, taillight, tailLens, turnRearSection, reverseRearSection, ledBar: ledBarMask } = taillightMasks();
+        const tailgateHandle = spec.bedCover
+          ? rrect(vec2(p.x, p.y.sub(tlY + tlH * 0.42)), vec2(0.085, 0.016), 0.005, fwXY).mul(rear)
+          : spec.barnDoors
+            ? rrect(vec2(p.x.add(0.072), p.y.sub(1.04)), vec2(0.013, 0.056), 0.005, fwXY).mul(rear)
+            : float(0.0);
+        const ledBar = ledBarMask.mul(tailLens).mul(one.sub(max(turnRearSection, reverseRearSection)));
+        const tailFacet = smoothstep(-tlH, tlH, tlUV.y).mul(0.28).add(0.78);
+        const tailRuby = mix(color(0x981018).mul(tailFacet), color(0xff2834), ledBar);
+        const tailColor = mix(mix(tailRuby, color(0xf07818), turnRearSection), color(0xe4edf4), reverseRearSection);
+
+        const rearValance = smoothstep(rearSill + 0.075, rearSill + 0.02, p.y).mul(rear);
+        const exhaust = rrectEdge(vec2(ax.sub(0.5), p.y.sub(rearSill + 0.036)), vec2(0.052, 0.017), 0.008, fwXY);
+        const exhaustRim = cov(exhaust.d, exhaust.w).mul(rearValance);
+        const exhaustBore = cov(exhaust.d.add(0.006), exhaust.w).mul(rearValance);
+        const reflector = rrect(vec2(ax.sub(0.65), p.y.sub(spec.bumpers[1][0] + 0.04)), vec2(0.075, 0.01), 0.004, fwXY).mul(rear);
+        const emblemRear = spec.barnDoors
+          ? float(0.0)
+          : rrect(vec2(p.x, p.y.sub(tlY - tlH * 0.12)), vec2(0.022, 0.01), 0.009, fwXY).mul(rear);
+
+        bCol.assign(mix(bCol, color(0x14171b), max(rearValance, tailgateHandle)));
+        bCol.assign(mix(mix(bCol, color(0x828a92), exhaustRim), color(0x060709), exhaustBore));
+        bCol.assign(mix(bCol, color(0x8a0c14), reflector));
+        bCol.assign(mix(bCol, color(0x16090c), taillight));
+        bCol.assign(mix(bCol, tailColor, tailLens));
+        bCol.assign(mix(bCol, color(0xb8c0c8), emblemRear));
+
+        const plateRecessR = cov(rearPlateEdge.d.sub(0.02), rearPlateEdge.w).mul(rear);
+        const plateRear = cov(rearPlateEdge.d, rearPlateEdge.w).mul(rear);
+        bCol.assign(mix(bCol, color(0x1e2227), plateRecessR));
+        bCol.assign(mix(bCol, plateCol, plateRear));
+      });
+
+      const under = smoothstep(-0.25, -0.55, n.y);
+      outCol.assign(mix(bCol, color(0x0c0e11), under));
+    }).ElseIf(isWindow.greaterThan(0.5), () => {
+      const { glass, frontGlass, rearGlass, seal } = evalWindowGlass();
+      const beltStrip = band(p.y.sub(belt.add(0.01)), 0.007, fwY)
+        .mul(smoothstep(0.5, 0.7, abs(n.x)))
+        .mul(cov(float(glassEndZ + 0.03).sub(p.z), fwZ))
+        .mul(cov(p.z.sub(cab.cowl - 0.07), fwZ));
+      const chromeBelt = beltStrip.mul(hasChrome);
+      const chmsl = chmslMask(() => rearGlass);
+      const rearWiper = spec.rearWiper
+        ? rrect(vec2(p.x.add(0.15), p.z.sub(cab.deck + 0.075)), vec2(0.22, 0.006), 0.003, fwXZ).mul(rearGlass)
+        : float(0.0);
+
+      const glassBase = mix(color(0x0a1016), color(0x1a2632), max(smoothstep(0.2, 0.9, n.y), fresnel.mul(0.55)));
+      const tlcSticker = rrect(vec2(p.x.add(bc.x - 0.16), p.z.sub(cab.cowl - 0.14)), vec2(0.045, 0.03), 0.008, fwXZ)
+        .mul(frontGlass)
+        .mul(isTLC);
+      const glassCol = mix(glassBase, color(0x3a88e8), tlcSticker.mul(0.65));
+      let roofPaint = mix(basePaint.mul(ao), color(0x111418), isTwoTone.mul(cov(float(rf.y - 0.04).sub(p.y), fwY)));
+      if (spec.slidingDoor) {
+        const [sdFront, sdRear, sdTop] = spec.slidingDoor;
+        const sdMidZ = (sdFront + sdRear) * 0.5;
+        const sdHalfZ = (sdFront - sdRear) * 0.5;
+        const slideSide = abs(p.z.sub(sdMidZ)).sub(sdHalfZ);
+        const slideTop = p.y.sub(sdTop);
+        const slideW = maxEdgeW(slideTop, slideSide, fwY, fwZ);
+        const slideSeamW = band(max(slideSide, slideTop), 0.0035, slideW).mul(step(p.x, -0.2)).mul(isSide);
+        const panelRibW = band(p.z.add(1.98), 0.0035, fwZ).mul(cov(slideTop, fwY)).mul(isSide).mul(0.55);
+        roofPaint = roofPaint.mul(one.sub(max(slideSeamW, panelRibW).mul(0.58)));
+      }
+      if (spec.barnDoors) {
+        const [barnW, barnTop] = spec.barnDoors;
+        const rearWall = smoothstep(-0.15, -0.45, n.z).mul(smoothstep(rearZone + 0.05, rearZone - 0.05, p.z));
+        const barnSide = ax.sub(barnW);
+        const barnTopD = p.y.sub(barnTop);
+        const barnEdgeW = maxEdgeW(barnTopD, barnSide, fwY, fwX);
+        const barnOutlineW = band(max(barnSide, barnTopD), 0.0035, barnEdgeW);
+        const barnSplitW = band(p.x, 0.0045, fwX).mul(cov(barnTopD, fwY));
+        const barnSeamW = max(barnOutlineW, barnSplitW).mul(rearWall);
+        const barnHinge = rrect(vec2(ax.sub(barnW), abs(p.y.sub(1.78)).sub(0.34)), vec2(0.022, 0.03), 0.005, fwXY).mul(rearWall);
+        roofPaint = mix(roofPaint.mul(one.sub(barnSeamW.mul(0.58))), color(0x14171b), barnHinge);
+      }
+      const wCol = mix(
+        mix(mix(mix(roofPaint, color(0x111315), max(seal, beltStrip)), glassCol, glass), color(0xd2d8de), chromeBelt),
+        color(0x6a0a0e),
+        chmsl
+      );
+      outCol.assign(mix(wCol, color(0x14171a), rearWiper));
+    }).ElseIf(isAlloyFace.greaterThan(0.5), () => {
+      // Evaluate atan2 and ONLY the active wheel spoke pattern on alloy fragments
+      const wAngle = atan(wheelVec.y, wheelVec.x);
+      const inSpokeZone = smoothstep(0.14, 0.18, rNorm).mul(smoothstep(0.63, 0.59, rNorm));
+      const wSel1 = step(abs(wheelCode.sub(1.0)), 0.25);
+      const wSel2 = step(abs(wheelCode.sub(2.0)), 0.25);
+      const spokeVal = float(0.0).toVar();
+      If(isPolice.greaterThan(0.5), () => {
+        const steelHoles = smoothstep(0.048, 0.028, abs(rNorm.sub(0.44))).mul(smoothstep(0.2, 0.5, cos(wAngle.mul(10.0))));
+        spokeVal.assign(one.sub(steelHoles));
+      }).ElseIf(wSel2.greaterThan(0.5), () => {
+        const fork = mix(float(0.62), float(0.22), smoothstep(0.34, 0.56, rNorm));
+        spokeVal.assign(smoothstep(0.26, 0.1, abs(cos(wAngle.mul(7.0)).sub(fork))));
+      }).ElseIf(wSel1.greaterThan(0.5), () => {
+        spokeVal.assign(smoothstep(0.32, 0.62, cos(wAngle.mul(10.0).add(rNorm.mul(2.2)))));
+      }).Else(() => {
+        const c5 = abs(cos(wAngle.mul(5.0)));
+        spokeVal.assign(smoothstep(0.54, 0.68, c5).mul(one.sub(smoothstep(0.86, 0.94, c5).mul(smoothstep(0.24, 0.34, rNorm)))));
+      });
+      const spokes = mix(float(0.55), spokeVal, fadeMed(fwSpoke)).mul(inSpokeZone);
+      const rimRing = smoothstep(0.59, 0.62, rNorm).mul(smoothstep(0.695, 0.675, rNorm));
+      const centerHub = smoothstep(0.2, 0.16, rNorm);
+      const lugHoles = smoothstep(0.145, 0.115, rNorm)
+        .mul(smoothstep(0.08, 0.105, rNorm))
+        .mul(smoothstep(0.4, 0.7, cos(wAngle.mul(5.0))))
+        .mul(fadeMed(max(fwRing, fwSpoke)));
+      const centerCap = smoothstep(0.075, 0.055, rNorm).mul(one.sub(isPolice));
+      const alloyMetal = clamp(max(spokes, max(rimRing, centerHub)).sub(max(lugHoles.mul(0.85), centerCap.mul(0.75))), 0.0, 1.0);
+      const brakeDisc = smoothstep(0.2, 0.24, rNorm).mul(smoothstep(0.5, 0.46, rNorm)).mul(one.sub(alloyMetal));
+      const brakeCaliper = brakeDisc.mul(smoothstep(0.15, 0.25, wheelVec.x)).mul(smoothstep(0.05, 0.15, wheelVec.y));
+      const wheelFinish = mix(
+        mix(color(0xd8e0e8), color(0x4a5058), max(isBlackout, step(abs(wheelCode.sub(3.0)), 0.25))),
+        color(0x181b1f),
+        isPolice.mul(one.sub(centerHub))
+      );
+      const rotorCol = mix(mix(color(0x0c0f13), color(0x3e444b), brakeDisc), color(0x8a1c20), brakeCaliper);
+      outCol.assign(mix(rotorCol, wheelFinish, alloyMetal));
+    }).ElseIf(isTyreRubber.greaterThan(0.5), () => {
+      const sidewallRib = smoothstep(0.018, 0.004, abs(rNorm.sub(0.8))).mul(0.06).mul(fadeFine(fwRing));
+      const tyreShade = smoothstep(0.88, 0.96, rNorm).mul(-0.14).add(0.92).add(sidewallRib);
+      outCol.assign(color(0x17191c).mul(tyreShade));
+    }).ElseIf(isMirror.greaterThan(0.5), () => {
+      const mirrorGlass = smoothstep(0.45, 0.65, n.z.negate());
+      const mirrorTurn = smoothstep(0.05, 0.2, n.z)
+        .mul(band(p.y.sub(bc.y + 0.082), 0.006, fwY))
+        .mul(cov(float(0.88).sub(ax), fwX));
+      const mirrorCapPaint = mix(basePaint, color(0x121519), max(isTwoTone, isBlackout));
+      outCol.assign(mix(mix(mirrorCapPaint, color(0x8896a2), mirrorGlass), color(0x98a4ae), mirrorTurn));
+    }).ElseIf(isSign.greaterThan(0.5), () => {
+      const signFace = smoothstep(0.55, 0.75, abs(n.z));
+      const signGlyph = signGlyphMask();
+      outCol.assign(mix(color(0xf3efe2), mix(color(0xfff1b8), color(0x15181b), signGlyph), signFace));
+    });
+
+    return outCol;
+  });
+
+  // ---- Roughness & metalness (glossy clearcoat with tight sun highlight & strong SSR/IBL reflection) ---------------
+  const paintRough = mix(float(0.11), float(0.16), isMetallic);
+  const paintMetal = mix(float(0.32), float(0.42), isMetallic).add(fresnel.mul(0.14));
+
+  const roughFn = Fn(() => {
+    const r = float(0.78).toVar();
+    If(isBody.greaterThan(0.5), () => {
+      const lowMatte = smoothstep(sillY + 0.10, sillY - 0.01, p.y).mul(0.16);
+      r.assign(paintRough.add(lowMatte));
+    }).ElseIf(isWindow.greaterThan(0.5), () => {
+      const { glass, seal } = evalWindowGlass();
+      r.assign(mix(mix(paintRough, float(0.78), seal), float(0.08), glass));
+    }).ElseIf(isAlloyFace.greaterThan(0.5), () => {
+      r.assign(mix(float(0.22), float(0.52), isPolice));
+    }).ElseIf(isMirror.greaterThan(0.5), () => {
+      r.assign(0.12);
+    }).ElseIf(isSign.greaterThan(0.5), () => {
+      r.assign(0.35);
+    });
+    return r;
+  });
+
+  const metalFn = Fn(() => {
+    const m = float(0.04).toVar();
+    If(isBody.greaterThan(0.5), () => {
+      m.assign(paintMetal);
+    }).ElseIf(isWindow.greaterThan(0.5), () => {
+      const { glass, seal } = evalWindowGlass();
+      m.assign(mix(mix(paintMetal, float(0.04), seal), mix(float(0.16), float(0.36), fresnel), glass));
+    }).ElseIf(isAlloyFace.greaterThan(0.5), () => {
+      m.assign(mix(float(0.84), float(0.22), isPolice));
+    }).ElseIf(isMirror.greaterThan(0.5), () => {
+      m.assign(mix(paintMetal, float(0.65), smoothstep(0.45, 0.65, n.z.negate())));
+    });
+    return m;
+  });
+
+  // ---- Emissive (evaluated only on front/rear lamp zones, taxi sign, or braking rear window) -----------------------
   const brake = state.x;
   const blink = max(state.y.mul(step(0.0, p.x)), state.z.mul(step(p.x, 0.0)));
   const nightHeadlamp = smoothstep(0.60, 1.15, cityUniforms.uInteriorGlow);
-  const headlamps = color(0xfff8ec)
-    .mul(headlightLens.mul(2.2).add(drl.mul(0.65)))
-    .mul(nightHeadlamp)
-    .mul(one.sub(turnFront.mul(blink)));
-  const tail = color(0xff0a12).mul(redLens.mul(tailShade).mul(brake.mul(2.1).add(nightHeadlamp.mul(0.4))));
-  const stop = color(0xff0a12).mul(chmsl.mul(brake).mul(2.1));
-  const turn = color(0xff9a14).mul(max(turnFront, turnRear).mul(blink).mul(2.2));
-  const sign = color(0xffe28a).mul(signFace.mul(one.sub(signGlyph.mul(0.9))).mul(1.65));
+
+  const emissiveFn = Fn(() => {
+    const emit = vec3(0.0).toVar();
+    If(isBody.greaterThan(0.5), () => {
+      If(p.z.greaterThan(frontZone).and(n.z.greaterThan(0.02)), () => {
+        const { turnFront, headlightLens, drl } = headlightMasks();
+        const headlamps = color(0xfff8ec)
+          .mul(headlightLens.mul(nightHeadlamp.mul(1.35).add(1.45)).add(drl.mul(nightHeadlamp.mul(0.75).add(1.65))))
+          .mul(one.sub(max(turnFront, drl).mul(blink)));
+        const turn = color(0xff9812).mul(max(turnFront, drl.mul(0.75)).mul(blink).mul(2.4));
+        emit.assign(headlamps.add(turn));
+      }).ElseIf(p.z.lessThan(rearZone).and(n.z.lessThan(-0.02)), () => {
+        const { tailLens, turnRearSection, reverseRearSection, ledBar: ledBarMask } = taillightMasks();
+        const turnRear = turnRearSection.mul(tailLens);
+        const redArea = tailLens.mul(one.sub(max(turnRearSection, reverseRearSection)));
+        const ledBar = ledBarMask.mul(redArea);
+        const redLens = max(redArea.mul(0.58), ledBar);
+        const tail = color(0xff0c16).mul(redLens.mul(brake.mul(2.3).add(nightHeadlamp.mul(0.55)).add(0.24)));
+        const turn = color(0xff9812).mul(turnRear.mul(blink).mul(2.4));
+        let rearEmit = tail.add(turn);
+        if (fixed) rearEmit = rearEmit.add(color(0xf0f6ff).mul(tailLens).mul(reverseRearSection).mul(state.w).mul(1.8));
+        emit.assign(rearEmit);
+      });
+    }).ElseIf(isSign.greaterThan(0.5), () => {
+      const signFace = smoothstep(0.55, 0.75, abs(n.z));
+      const signGlyph = signGlyphMask();
+      emit.assign(color(0xffe28a).mul(signFace.mul(one.sub(signGlyph.mul(0.9))).mul(1.65)));
+    }).ElseIf(isWindow.mul(brake).greaterThan(0.5), () => {
+      const chmsl = chmslMask(() => {
+        const rear = polygonEdge(ax, p.z, rearGlassPlanes, 0.085, fwX, fwZ);
+        return cov(rear.d, rear.w);
+      });
+      emit.assign(color(0xff0c16).mul(chmsl.mul(2.3)));
+    });
+    return emit;
+  });
 
   const mat = new THREE.MeshStandardNodeMaterial();
+  mat.envMapIntensity = 1.35;
   if (fixed) mat.userData.carState = stateUniform;
-  mat.colorNode = col;
-  mat.roughnessNode = rough;
-  mat.metalnessNode = metal;
-  mat.emissiveNode = headlamps.add(tail).add(stop).add(turn).add(sign);
-  if (fixed) mat.emissiveNode = mat.emissiveNode.add(color(0xf0f6ff).mul(tailLens).mul(reverseRearSection).mul(state.w).mul(1.8));
+  mat.colorNode = colorFn();
+  mat.roughnessNode = roughFn();
+  mat.metalnessNode = metalFn();
+  mat.emissiveNode = emissiveFn();
 
   _carMaterialCache.set(cacheKey, mat);
   return mat;
@@ -1326,83 +2048,134 @@ function limbSections(joints, segments = 6, phase = 0) {
 const BUS_PARTS = {
   BODY: 0,
   TRIM: 1,
-  POD: 2
+  POD: 2,
+  FAIRING: 3
 };
 
 const BUS_SPEC = {
   name: 'bus',
-  headlight: [0.79, 0.8], // midpoint of each pair of white lamps; excludes the outer amber indicator
-  zFront: 5.78,
-  zRear: -5.78,
-  wheelRadius: 0.48,
+  headlight: [0.89, 0.78], // midpoint of each swept Xcelsior LED headlamp cluster
+  zFront: 5.9,
+  zRear: -6.22,
+  wheelRadius: 0.5,
   wheelZ: 3.6,
-  wheelX: 1.24,
-  archGap: 0.09,
-  archFlare: 0,
-  tuck: 0.05,
-  stationStep: 0.62,
-  lowerRound: 2.6,
-  upperRound: 6,
-  upperSamples: [0.3, 0.56, 0.74, 0.88, 1],
-  halfWidth: [[5.78, 1.3], [-5.78, 1.3]],
-  sill: [[5.78, 0.36], [-5.78, 0.36]],
-  shoulder: [[5.78, 1.05], [-5.78, 1.05]],
-  edge: [[5.78, 2.96], [-5.78, 2.96]],
-  crown: [[5.78, 0.045], [-5.78, 0.045]],
-  tumble: [[5.78, 0.17], [-5.78, 0.17]],
-  nose: { halfWidth: [0.28, 1.02, 2], edge: [0.24, 2.68, 2], crown: [0.24, 0.005, 2], sill: [0.07, 0.44, 2], shoulder: [0.2, 0.95, 2] },
-  tail: { halfWidth: [0.24, 1.06, 2], edge: [0.2, 2.72, 2], crown: [0.2, 0.005, 2], sill: [0.09, 0.46, 2], shoulder: [0.2, 0.95, 2] },
-  rake: 0.15, // how far the top of the windshield leans back
-  window: [1.24, 2.44], // side window band (y)
-  frontDoor: [4.36, 5.36], // curb-side (-x) doors (z ranges)
-  rearDoor: [-1.52, -0.5]
+  wheelX: 1.12,
+  archGap: 0.085,
+  archFlare: 0.012,
+  tuck: 0.035,
+  stationStep: 0.92,
+  lowerRound: 3.4,
+  upperRound: 7.5,
+  upperSamples: [0.35, 0.66, 0.89, 1],
+  halfWidth: [[5.9, 1.3], [-6.22, 1.3]],
+  sill: [[5.9, 0.35], [-6.22, 0.36]],
+  shoulder: [[5.9, 0.98], [-6.22, 0.98]],
+  edge: [[5.9, 2.94], [-6.22, 2.94]],
+  crown: [[5.9, 0.04], [-6.22, 0.04]],
+  tumble: [[5.9, 0.055], [-6.22, 0.055]],
+  nose: { halfWidth: [0.28, 1.06, 2.2], edge: [0.26, 2.74, 2], crown: [0.26, 0.006, 2], sill: [0.08, 0.42, 2], shoulder: [0.2, 0.92, 2] },
+  tail: { halfWidth: [0.22, 1.12, 2.2], edge: [0.2, 2.78, 2], crown: [0.2, 0.006, 2], sill: [0.1, 0.46, 2], shoulder: [0.18, 0.94, 2] },
+  rake: 0.22, // how far the top of the windshield & sign header leans back
+  window: [1.22, 2.42], // side window band (y)
+  frontDoor: [4.36, 5.42], // curb-side (-x) low-floor entry & rear exit doors (z ranges)
+  rearDoor: [-2.06, -1.02]
 };
 
-// The windshield rake: the upper front leans back by up to BUS_SPEC.rake, fading out along the first metre
-function busRake(y, z) {
+// Windshield & header rake at the nose (plus slight plan-view bow and upper-rear cap taper)
+function busRake(y, z, x = 0) {
   const s = BUS_SPEC;
-  const along = Math.min(1, Math.max(0, (z - (s.zFront - 1.0)) / 1.0));
-  const up = Math.min(1, Math.max(0, (y - 1.0) / 1.75));
-  return s.rake * along * along * Math.pow(up, 1.3);
+  const alongF = Math.min(1, Math.max(0, (z - (s.zFront - 1.15)) / 1.15));
+  const upF = Math.min(1, Math.max(0, (y - 1.1) / 1.72));
+  const noseBow = alongF * alongF * (0.028 * x * x + Math.max(0, 1.12 - y) * 0.035);
+  const alongR = Math.min(1, Math.max(0, (s.zRear + 0.75 - z) / 0.75));
+  const upR = Math.min(1, Math.max(0, (y - 1.38) / 1.5));
+  const tailTaper = -0.055 * alongR * alongR * Math.pow(upR, 1.25);
+  return s.rake * alongF * alongF * Math.pow(upF, 1.22) + noseBow + tailTaper;
 }
 
 function buildLoftedBusBodyGeometry() {
   const s = BUS_SPEC;
   const body = buildBodyLoft(s, 1);
   const pos = body.attributes.position;
-  for (let i = 0; i < pos.count; i++) pos.setZ(i, pos.getZ(i) - busRake(pos.getY(i), pos.getZ(i)));
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const y = pos.getY(i);
+    const z = pos.getZ(i);
+    pos.setZ(i, z - busRake(y, z, x));
+  }
   body.computeVertexNormals();
   const parts = [part(body, BUS_PARTS.BODY)];
 
-  // Bumpers, front bike rack (folded), stalk mirrors
-  parts.push(part(roundedBox(1.24, 0.12, 0.24, 0.07, 0.03).translate(0, 0.5, s.zFront - 0.05), BUS_PARTS.TRIM));
-  parts.push(part(roundedBox(1.24, 0.11, 0.22, 0.06, 0.03).translate(0, 0.48, s.zRear + 0.05), BUS_PARTS.TRIM));
-  const rackZ = s.zFront + 0.13;
-  parts.push(part(roundedBox(0.5, 0.024, 0.05, 0.02, 0.008).translate(0, 1.0, rackZ + 0.05), BUS_PARTS.TRIM));
-  parts.push(part(roundedBox(0.46, 0.02, 0.05, 0.018, 0.008).translate(0, 0.74, rackZ), BUS_PARTS.TRIM));
+  // Sculpted New Flyer Xcelsior full-length roof fairing (shroud): aerodynamic sloped nose behind the front sign,
+  // raised battery/cooling fairing over the front half, stepped rear HVAC shroud, painted in upper-body livery
+  const roofY = s.edge[0][1] + s.crown[0][1] - 0.03;
+  const fairingStations = [
+    [4.68, 0.92, 0.01, 0.005],
+    [4.12, 1.08, 0.22, 0.035],
+    [3.35, 1.13, 0.26, 0.04],
+    [-0.35, 1.13, 0.26, 0.04],
+    [-0.85, 1.12, 0.2, 0.035],
+    [-5.55, 1.11, 0.19, 0.035],
+    [-5.95, 0.98, 0.02, 0.008]
+  ];
+  const fairingSections = fairingStations.map(([z, hw, h, cr]) =>
+    mirrorSection(
+      [
+        [hw, roofY],
+        [hw - 0.035, roofY + h * 0.68],
+        [hw - 0.12, roofY + h],
+        [hw * 0.45, roofY + h + cr * 0.8]
+      ],
+      [0, roofY + h + cr],
+      z
+    )
+  );
+  parts.push(part(new LoftGeometry(fairingSections, { closed: false }), BUS_PARTS.FAIRING));
+
+  // Recessed roof HVAC & battery cooling modules nested inside the roof shroud
+  parts.push(part(roundedBox(0.88, 0.065, 2.5, 0.08, 0.025).translate(0, roofY + 0.22, -3.35), BUS_PARTS.POD));
+  parts.push(part(roundedBox(0.84, 0.06, 2.7, 0.08, 0.025).translate(0, roofY + 0.27, 1.45), BUS_PARTS.POD));
+
+  // Wraparound 3-piece energy-absorbing front & rear bumpers + folded Sportworks front bike rack
+  const zNose = s.zFront - busRake(0.48, s.zFront, 0);
+  parts.push(part(roundedBox(1.27, 0.13, 0.26, 0.075, 0.028).translate(0, 0.47, zNose - 0.02), BUS_PARTS.TRIM));
+  parts.push(part(roundedBox(1.26, 0.125, 0.24, 0.065, 0.028).translate(0, 0.46, s.zRear + 0.03), BUS_PARTS.TRIM));
+  const rackZ = zNose + 0.14;
+  parts.push(part(roundedBox(0.54, 0.022, 0.045, 0.018, 0.007).translate(0, 0.96, rackZ + 0.03), BUS_PARTS.TRIM));
+  parts.push(part(roundedBox(0.5, 0.02, 0.045, 0.016, 0.007).translate(0, 0.68, rackZ), BUS_PARTS.TRIM));
   for (const side of [-1, 1]) {
-    parts.push(part(new THREE.BoxGeometry(0.035, 0.36, 0.035).rotateX(-0.14).translate(side * 0.47, 0.83, rackZ + 0.02), BUS_PARTS.TRIM));
-    // Mirror stalk from the roof corner, curving forward & out to a tall mirror head ahead of the windshield corner
-    const stalk = new THREE.BoxGeometry(0.035, 0.035, 0.5)
-      .rotateX(0.55)
-      .rotateY(side * 0.35)
-      .translate(side * 1.2, 2.58, s.zFront - 0.12);
-    const head = roundedBox(0.075, 0.2, 0.06, 0.03, 0.012).translate(side * 1.36, 2.24, s.zFront + 0.12);
+    parts.push(part(new THREE.BoxGeometry(0.032, 0.34, 0.032).rotateX(-0.1).translate(side * 0.49, 0.81, rackZ + 0.015), BUS_PARTS.TRIM));
+    parts.push(part(new THREE.BoxGeometry(0.024, 0.28, 0.024).rotateX(-0.1).translate(side * 0.18, 0.81, rackZ + 0.015), BUS_PARTS.TRIM));
+  }
+
+  // Asymmetric Xcelsior transit mirrors: high-mount curb arm (-x) clearing boarding passengers, mid-mount driver arm (+x)
+  for (const side of [-1, 1]) {
+    const mountY = side < 0 ? 2.48 : 2.16;
+    const headY = side < 0 ? 2.28 : 1.98;
+    const stalk = new THREE.BoxGeometry(0.036, 0.036, 0.44)
+      .rotateX(0.32)
+      .rotateY(side * 0.42)
+      .translate(side * 1.27, mountY - 0.06, s.zFront - 0.06);
+    const head = roundedBox(0.072, 0.19, 0.055, 0.026, 0.01).translate(side * 1.37, headY, s.zFront + 0.08);
     parts.push(part(stalk, BUS_PARTS.TRIM), part(head, BUS_PARTS.TRIM));
   }
 
-  // Roof equipment: air-conditioning pod at the rear, hybrid battery pod ahead of it
-  const roofY = s.edge[0][1] + s.crown[0][1];
-  parts.push(part(roundedBox(0.98, 0.15, 2.5, 0.12, 0.05).translate(0, roofY + 0.1, -3.55), BUS_PARTS.POD));
-  parts.push(part(roundedBox(0.82, 0.1, 3.0, 0.08, 0.04).translate(0, roofY + 0.06, 1.1), BUS_PARTS.POD));
-
-  // Arch liners
+  // Enclosed 3D wheel-well housings (inward-facing arch ceiling + double-sided back liner) so no gap shows around the wheels
+  const wellR = s.wheelRadius + s.archGap + 0.008;
+  const wellDepth = 0.36;
   for (const side of [-1, 1]) {
     for (const z of [-s.wheelZ, s.wheelZ]) {
-      const well = new THREE.CircleGeometry(s.wheelRadius + s.archGap + 0.01, 10, 0, Math.PI)
+      const cyl = new THREE.CylinderGeometry(wellR, wellR, wellDepth, 10, 1, true, -0.28, Math.PI + 0.56)
+        .scale(-1, 1, 1)
+        .rotateZ(-Math.PI * 0.5)
+        .translate(side * (s.wheelX - 0.02), s.wheelRadius, z);
+      const backOut = new THREE.CircleGeometry(wellR, 10, -0.28, Math.PI + 0.56)
         .rotateY(side * Math.PI * 0.5)
-        .translate(side * (s.wheelX - 0.2), s.wheelRadius, z);
-      parts.push(part(well, BUS_PARTS.TRIM));
+        .translate(side * (s.wheelX - 0.19), s.wheelRadius, z);
+      const backIn = new THREE.CircleGeometry(wellR, 10, -0.28, Math.PI + 0.56)
+        .rotateY(-side * Math.PI * 0.5)
+        .translate(side * (s.wheelX - 0.19), s.wheelRadius, z);
+      parts.push(part(cyl, BUS_PARTS.TRIM), part(backOut, BUS_PARTS.TRIM), part(backIn, BUS_PARTS.TRIM));
     }
   }
   return mergeGeometries(parts);
@@ -1410,63 +2183,76 @@ function buildLoftedBusBodyGeometry() {
 
 /**
  * Destination sign panels for the bus's sign texture (route badge + destination): above the windshield, on the curb
- * side by the front door, and the route badge alone above the rear window. Same object space as the bus body.
+ * side behind the front door, and the route number box on the upper-right rear cap. Same object space as the bus body.
  */
 function buildBusSignGeometry() {
   const s = BUS_SPEC;
   const panels = [];
-  const yF = 2.55;
-  const front = new THREE.PlaneGeometry(1.9, 0.27);
-  front.rotateX(-Math.atan2(s.rake * 1.3 * 0.62, 1.75));
-  front.translate(0, yF, s.zFront - busRake(yF, s.zFront) + 0.012);
+  const yF = 2.56;
+  const z0 = s.zFront - busRake(yF - 0.13, s.zFront, 0);
+  const z1 = s.zFront - busRake(yF + 0.13, s.zFront, 0);
+  const front = new THREE.PlaneGeometry(1.94, 0.27);
+  front.rotateX(-Math.atan2(z0 - z1, 0.26));
+  front.translate(0, yF, (z0 + z1) * 0.5 + 0.014);
   panels.push(front);
-  const side = new THREE.PlaneGeometry(1.15, 0.2).rotateY(-Math.PI / 2);
-  side.translate(-(carBodyHalfWidthAt(s, 3.9, 2.58) + 0.006), 2.58, 3.9);
+  const sideZ = 3.74;
+  const sideY = 2.26;
+  const side = new THREE.PlaneGeometry(1.08, 0.19).rotateY(-Math.PI / 2);
+  side.translate(-(carBodyHalfWidthAt(s, sideZ, sideY) + 0.007), sideY, sideZ);
   panels.push(side);
-  const rear = new THREE.PlaneGeometry(0.52, 0.2);
+  const yR = 2.58;
+  const zR0 = s.zRear - busRake(yR - 0.1, s.zRear, -0.45);
+  const zR1 = s.zRear - busRake(yR + 0.1, s.zRear, -0.45);
+  const rear = new THREE.PlaneGeometry(0.52, 0.21);
   const uv = rear.attributes.uv;
   for (let i = 0; i < uv.count; i++) uv.setX(i, uv.getX(i) * 0.29);
-  rear.rotateY(Math.PI).translate(0, 2.55, s.zRear - 0.012);
+  rear.rotateY(Math.PI);
+  rear.rotateX(Math.atan2(zR1 - zR0, 0.2));
+  rear.translate(-0.45, yR, (zR0 + zR1) * 0.5 - 0.012);
   panels.push(rear);
   return mergeGeometries(panels);
 }
 
-// Bus wheel: tall tyre with a deep steel disc, 10 lug nuts and a hub cap on both outer and inner faces (spins about x, centred on the origin)
+// Heavy-duty 22.5" transit bus wheel: tall 305/70R22.5 tyre sidewall with deep-dish white/silver steel wheel,
+// 10 lug nuts, 5 hand-hole cutouts, and a protruding cast-iron axle hub (spins about x, centred on the origin)
 function buildBusWheelGeo(side) {
   const r = BUS_SPEC.wheelRadius;
   const w = 0.3;
+  const rimR = r * 0.59;
   const tyre = new THREE.LatheGeometry(
     [
-      new THREE.Vector2(r * 0.72, -w * 0.5),
-      new THREE.Vector2(r * 0.97, -w * 0.38),
-      new THREE.Vector2(r, 0),
-      new THREE.Vector2(r * 0.97, w * 0.38),
-      new THREE.Vector2(r * 0.72, w * 0.5)
+      new THREE.Vector2(rimR, -w * 0.48),
+      new THREE.Vector2(r * 0.95, -w * 0.44),
+      new THREE.Vector2(r, -w * 0.28),
+      new THREE.Vector2(r, w * 0.28),
+      new THREE.Vector2(r * 0.95, w * 0.44),
+      new THREE.Vector2(rimR, w * 0.48)
     ],
-    20
+    22
   );
   const disc = new THREE.LatheGeometry(
-    [new THREE.Vector2(r * 0.72, w * 0.5), new THREE.Vector2(r * 0.66, w * 0.4), new THREE.Vector2(r * 0.56, w * 0.18), new THREE.Vector2(0.15, w * 0.16)],
-    20
+    [
+      new THREE.Vector2(rimR, w * 0.48),
+      new THREE.Vector2(rimR * 0.92, w * 0.42),
+      new THREE.Vector2(rimR * 0.72, w * 0.18),
+      new THREE.Vector2(0.115, w * 0.22)
+    ],
+    22
   );
   const backDisc = new THREE.LatheGeometry(
     [
-      new THREE.Vector2(0, -w * 0.16),
-      new THREE.Vector2(0.15, -w * 0.16),
-      new THREE.Vector2(r * 0.56, -w * 0.18),
-      new THREE.Vector2(r * 0.66, -w * 0.4),
-      new THREE.Vector2(r * 0.72, -w * 0.5)
+      new THREE.Vector2(0, -w * 0.18),
+      new THREE.Vector2(rimR * 0.75, -w * 0.18),
+      new THREE.Vector2(rimR, -w * 0.48)
     ],
-    20
+    14
   );
-  const cap = new THREE.CylinderGeometry(0.1, 0.13, 0.12, 14).translate(0, w * 0.2, 0);
-  const backCap = new THREE.CylinderGeometry(0.13, 0.1, 0.12, 14).translate(0, -w * 0.2, 0);
+  const cap = new THREE.CylinderGeometry(0.095, 0.118, 0.13, 14).translate(0, w * 0.26, 0);
   const parts = [
     part(tyre, CAR_PARTS.TYRE),
     part(disc, CAR_PARTS.ALLOY),
     part(backDisc, CAR_PARTS.ALLOY),
-    part(cap, CAR_PARTS.ALLOY),
-    part(backCap, CAR_PARTS.ALLOY)
+    part(cap, CAR_PARTS.ALLOY)
   ];
   for (const g of parts) g.rotateZ(-side * Math.PI * 0.5);
   return mergeGeometries(parts);
@@ -1480,22 +2266,50 @@ function createBusWheelMaterial() {
   const partId = attribute('partId', 'float');
   const isTyre = step(abs(partId.sub(CAR_PARTS.TYRE)), 0.25);
   const radial = length(vec2(p.z, p.y));
-  const angle = vec2(p.z, p.y).div(max(radial, 0.0001));
-  let lugs = float(0.0);
-  for (let k = 0; k < 10; k++) {
-    const a = (k * Math.PI * 2) / 10;
-    lugs = max(lugs, smoothstep(0.024, 0.014, length(vec2(p.z, p.y).sub(vec2(Math.cos(a) * 0.205, Math.sin(a) * 0.205)))));
-  }
-  const groove = smoothstep(0.006, 0.0, abs(radial.sub(0.29)));
-  const steel = color(0xb9c0c6).mul(float(1.0).sub(groove.mul(0.5)));
-  const hub = mix(steel, color(0x6b7176), smoothstep(0.13, 0.1, radial));
-  const disc = mix(hub, color(0x2a2e33), lugs.mul(0.8));
-  const sidewall = smoothstep(0.37, 0.43, radial).mul(0.25).add(0.75);
-  const tread = step(0.5, fract(angle.y.mul(9.0).add(angle.x.mul(9.0)))).mul(0.08);
+  const theta = atan(p.y, p.z);
+  // Footprints across the wheel's rings (radial) and around it (tangential), from the per-axis footprint in the (z, y)
+  // wheel plane, so the disc stays sharp when it is seen at a grazing angle
+  const fwZY = max(vec2(fwidth(p.z), fwidth(p.y)), vec2(0.0015)).toVar();
+  const radDir = vec2(p.z, p.y).div(max(radial, 0.0001));
+  const fwRing = abs(radDir.x).mul(fwZY.x).add(abs(radDir.y).mul(fwZY.y));
+  const fwTan = abs(radDir.y).mul(fwZY.x).add(abs(radDir.x).mul(fwZY.y));
+  const fwRound = max(fwRing, fwTan);
+  const covAt = (r, d, w) => clamp(float(0.5).sub(d.sub(r).div(w)), 0.0, 1.0);
+  // Exact box filter of a band |d| < h, so the thin rings narrow and lighten smoothly instead of fading out
+  const band = (d, h, w) => clamp(min(d.add(h), w.mul(0.5)).sub(max(d.sub(h), w.mul(-0.5))).div(w), 0.0, 1.0);
+  const detailFade = (w) => smoothstep(0.036, 0.008, w);
+
+  // Fold 10 lug nuts & orange safety indicators into a single angular sector, anti-aliased and faded
+  const a10 = fract(theta.mul(1.5915494).add(0.5)).sub(0.5).mul(0.6283185);
+  const lugArc = radial.mul(a10);
+  const dLug = length(vec2(radial.sub(0.175), lugArc));
+  const lugs = covAt(0.015, dLug, fwRound).mul(detailFade(fwRound));
+  const dTag = length(vec2(radial.sub(0.192), lugArc));
+  const indicators = covAt(0.011, dTag, fwRound)
+    .mul(float(1.0).sub(covAt(0.009, dLug, fwRound)))
+    .mul(detailFade(fwRound));
+
+  // Fold 5 hand-hole cutouts into a single angular sector, anti-aliased
+  const a5 = fract(theta.sub(0.31).mul(0.7957747).add(0.5)).sub(0.5).mul(1.256637);
+  const dVent = length(vec2(radial.sub(0.238), radial.mul(a5).mul(0.85)));
+  const vents = covAt(0.03, dVent, fwRound).mul(smoothstep(0.06, 0.015, fwRound));
+
+  const rimLip = band(radial.sub(0.282), 0.008, fwRing);
+  const dishShade = smoothstep(0.16, 0.27, radial).mul(0.22).add(0.78);
+  const steelBase = color(0xdce2e8).mul(dishShade).mul(float(1.0).sub(rimLip.mul(0.35)));
+  const withVents = mix(steelBase, color(0x101317), vents.mul(0.92));
+  const withHub = mix(withVents, color(0x22262b), covAt(0.115, radial, fwRing));
+  const hubCapCenter = mix(withHub, color(0x3a4048), covAt(0.068, radial, fwRing));
+  const withIndicators = mix(hubCapCenter, color(0xe84818), indicators.mul(0.85));
+  const disc = mix(withIndicators, color(0x1e2228), lugs.mul(0.88));
+
+  const scuffRib = band(radial.sub(0.41), 0.008, fwRing).mul(0.06);
+  const sidewall = smoothstep(0.295, 0.36, radial).mul(float(1.0).sub(smoothstep(0.44, 0.495, radial).mul(0.22))).mul(0.28).add(0.72).add(scuffRib);
+  const tread = smoothstep(0.38, 0.52, fract(theta.mul(7.64))).mul(smoothstep(0.45, 0.48, radial)).mul(detailFade(fwTan)).mul(0.07);
   const mat = new THREE.MeshStandardNodeMaterial();
-  mat.colorNode = mix(disc, color(0x17191c).mul(sidewall.add(tread)), isTyre);
-  mat.roughnessNode = mix(float(0.35), float(0.88), isTyre);
-  mat.metalnessNode = mix(float(0.75), float(0.0), isTyre);
+  mat.colorNode = mix(disc, color(0x16181b).mul(sidewall.add(tread)), isTyre);
+  mat.roughnessNode = mix(mix(float(0.32), float(0.78), max(vents, smoothstep(0.12, 0.1, radial))), float(0.86), isTyre);
+  mat.metalnessNode = mix(mix(float(0.55), float(0.15), vents), float(0.02), isTyre);
   _busWheelMat = mat;
   return mat;
 }
@@ -1503,13 +2317,16 @@ function createBusWheelMaterial() {
 let _busLoftedMat = null;
 
 /**
- * Creates the TSL procedural material for MTA buses:
- * - Wraparound split windshield with gasket & centre post, destination sign band above it; rear window & engine
- *   louvres on the rear face
- * - Continuous side window band with mullions, the driver's window, glazed curb-side front & rear doors
- * - MTA livery: pearl white with the vivid blue band & cyan ribbon below the windows and a dark skirt
- * - Headlamps, turn signals (per-instance `busState`: brake, left (+x), right (-x)), tail / brake light columns,
- *   NY plates; black trims & light-grey roof pods
+ * Creates the TSL procedural material for MTA New Flyer Xcelsior XD40/XE40 buses:
+ * - Black wraparound front windshield & destination-sign mask with 5 amber roof brow marker LEDs, wipers & MTA badge
+ * - Swept Xcelsior LED projector headlamp clusters, front/rear NY plates, 4-lamp vertical circular rear LED columns,
+ *   stamped upper-rear air intake louvers & rear ad frame
+ * - Framed side window band with upper transom bar, interior passenger seats, yellow vertical grab stanchions & ceiling
+ *   lighting (illuminated at night), plus glazed dual-leaf curb-side front & rear doors
+ * - Per-instance livery variety (zero extra draw calls via `busState.w` or `instanceIndex`):
+ *   0/default: Current MTA NYC Transit Blue/Gold livery (deep royal blue, yellow-gold rear cap, gold/cyan upper swoop & speed lines)
+ *   1: MTA +Select Bus Service+ (SBS) livery (vivid turquoise/cyan lower body & front fascia, royal blue upper, gold swoop)
+ *   2: Classic MTA White & Blue Stripe livery (pearl white body, vivid blue belt stripe & cyan ribbon)
  */
 function createLoftedBusMaterial() {
   if (_busLoftedMat) return _busLoftedMat;
@@ -1521,91 +2338,331 @@ function createLoftedBusMaterial() {
   const isBody = step(abs(partId.sub(BUS_PARTS.BODY)), 0.25);
   const isTrim = step(abs(partId.sub(BUS_PARTS.TRIM)), 0.25);
   const isPod = step(abs(partId.sub(BUS_PARTS.POD)), 0.25);
+  const isFairing = step(abs(partId.sub(BUS_PARTS.FAIRING)), 0.25);
+  const isSkin = max(isBody, isFairing);
   const ax = abs(p.x);
+  const az = abs(p.z);
   const one = float(1.0);
 
-  const front = smoothstep(0.1, 0.35, n.z).mul(step(s.zFront - 0.9, p.z)).mul(isBody);
-  const rear = smoothstep(0.1, 0.35, n.z.negate()).mul(step(p.z, s.zRear + 0.9)).mul(isBody);
-  const side = smoothstep(0.5, 0.75, abs(n.x)).mul(isBody);
+  // Per-axis screen footprint of the object-space position and its reciprocals (division-free analytic box-filter AA).
+  // Each edge uses the footprint across itself and ramps over one footprint, so the long horizontal livery lines and
+  // window edges stay sharp when the side is seen at a grazing angle (anisotropic filtering).
+  const fwp = max(fwidth(p), vec3(0.0015)).toVar();
+  const fwX = fwp.x;
+  const fwY = fwp.y;
+  const fwZ = fwp.z;
+  const invX = float(1.0).div(fwX).toVar();
+  const invY = float(1.0).div(fwY).toVar();
+  const invZ = float(1.0).div(fwZ).toVar();
+  const invXY = float(1.0).div(max(fwX, fwY)).toVar(); // small round features on the front & rear faces
+  const invZY = float(1.0).div(max(fwZ, fwY)).toVar(); // ... and on the sides
+  const cov = (d, inv) => clamp(float(0.5).sub(d.mul(inv)), 0.0, 1.0);
+  const covAt = (r, d, inv) => clamp(float(0.5).sub(d.sub(r).mul(inv)), 0.0, 1.0);
+  const covUp = (r, d, inv) => clamp(float(0.5).add(d.sub(r).mul(inv)), 0.0, 1.0);
+  // Exact box filter of a band |d| < h: thin lines narrow and lighten smoothly below a pixel instead of fading out
+  const band = (d, h, inv) => {
+    const half = float(0.5).div(inv);
+    return clamp(min(d.add(h), half).sub(max(d.sub(h), half.negate())).mul(inv), 0.0, 1.0);
+  };
+  const detailFade = (w) => smoothstep(0.055, 0.014, w);
+  const fineFade = (w) => smoothstep(0.028, 0.007, w);
+
+  // Box / rounded-box distances with the reciprocal footprint across their nearest edge (the dominant axis), given
+  // the reciprocal footprints (ix, iy) of the two coordinates
+  const boxEdge = (dx, dy, hx, hy, ix, iy) => {
+    const ex = abs(dx).sub(hx);
+    const ey = abs(dy).sub(hy);
+    return { d: max(ex, ey), inv: mix(iy, ix, step(ey, ex)) };
+  };
+  const boxMask = (dx, dy, hx, hy, ix, iy) => {
+    const e = boxEdge(dx, dy, hx, hy, ix, iy);
+    return cov(e.d, e.inv);
+  };
+  const rBoxEdge = (dx, dy, hx, hy, r, ix, iy) => {
+    const ex = abs(dx).sub(hx - r);
+    const ey = abs(dy).sub(hy - r);
+    return {
+      d: length(vec2(max(ex, 0.0), max(ey, 0.0))).add(min(max(ex, ey), 0.0)).sub(r),
+      inv: mix(iy, ix, step(ey, ex))
+    };
+  };
+
+  // Decode per-instance variant once in the vertex stage: state.w - 1 when provided by traffic.js (> 0.5), else instanceIndex
+  const rawIdx = mix(float(instanceIndex), max(float(0.0), state.w.sub(1.0)), step(0.5, state.w));
+  const slot4 = fract(rawIdx.mul(0.25)).mul(4.0);
+  const vVariant = varying(
+    vertexStage(
+      vec2(
+        step(0.5, slot4).mul(step(slot4, 1.5)), // x = isSBS (slot 1, 25%)
+        step(2.5, slot4) // y = isLegacy (slot 3, 25%); slots 0 & 2 (50%) = Current MTA Blue/Gold
+      )
+    )
+  );
+  const isSBS = vVariant.x;
+  const isLegacy = vVariant.y;
+
+  const front = smoothstep(0.15, 0.42, n.z).mul(smoothstep(s.zFront - 0.98, s.zFront - 0.9, p.z)).mul(isBody);
+  const rear = smoothstep(0.15, 0.42, n.z.negate()).mul(smoothstep(s.zRear + 0.98, s.zRear + 0.9, p.z)).mul(isBody);
+  const side = smoothstep(0.45, 0.72, abs(n.x)).mul(isSkin);
   const curb = step(p.x, 0.0);
 
-  // Windshield (wrapping round the corners), sign band, gasket; rear window & engine louvres
-  const frontGlass = roundedRect(vec2(p.x, p.y.sub(1.82)), vec2(1.2, 0.58), 0.14).mul(smoothstep(0.012, 0.024, ax)).mul(front);
-  const frontSeal = roundedRect(vec2(p.x, p.y.sub(1.82)), vec2(1.24, 0.62), 0.16).mul(front);
-  const signBand = roundedRect(vec2(p.x, p.y.sub(2.55)), vec2(1.02, 0.16), 0.04).mul(front);
-  const rearGlass = roundedRect(vec2(p.x, p.y.sub(2.06)), vec2(0.92, 0.36), 0.08).mul(rear);
-  const rearSeal = roundedRect(vec2(p.x, p.y.sub(2.06)), vec2(0.96, 0.4), 0.1).mul(rear);
-  const louvres = roundedRect(vec2(p.x, p.y.sub(0.98)), vec2(0.78, 0.34), 0.05).mul(rear);
-  const slats = step(0.5, fract(p.y.mul(16.0))).mul(0.45).add(0.4);
+  // 1. Front mask: unified black Xcelsior windshield + destination sign surround, split windshield glass & wipers
+  const frontMaskEdge = rBoxEdge(p.x, p.y.sub(1.97), 1.22, 0.8, 0.15, invX, invY);
+  const frontMask = cov(frontMaskEdge.d, frontMaskEdge.inv).mul(front);
+  const frontGlassOuter = boxMask(p.x, p.y.sub(1.8), 1.15, 0.56, invX, invY).mul(frontMask);
+  const centerDivider = one.sub(band(p.x, 0.015, invX));
+  const inWiperY = smoothstep(1.23, 1.25, p.y).mul(smoothstep(1.97, 1.95, p.y));
+  const wiperTilt = p.y.sub(1.24).mul(0.36);
+  const wipers = max(band(p.x.sub(0.38).add(wiperTilt), 0.015, invX), band(p.x.add(0.14).sub(wiperTilt), 0.015, invX))
+    .mul(inWiperY);
+  const frontGlass = frontGlassOuter.mul(centerDivider).mul(one.sub(wipers.mul(0.85)));
+  const signBand = boxMask(p.x, p.y.sub(2.56), 1.02, 0.16, invX, invY).mul(front);
 
-  // Side window band with mullions; driver's window; curb-side doors (glazed leaves, frames)
+  // 5 amber roof brow marker LEDs folded into 2 distance checks
+  const browCenterX = min(ax, abs(ax.sub(0.13)));
+  const browMarker = max(
+    covAt(0.022, length(vec2(browCenterX.mul(0.7), p.y.sub(2.81).mul(1.4))), invXY),
+    covAt(0.025, length(vec2(ax.sub(0.98).mul(0.65), p.y.sub(2.79).mul(1.4))), invXY)
+  ).mul(front);
+
+  // 2. Xcelsior Rear Face: solid engine/cooling hood, upper-left (+x) 2x3 air louvers, upper-right (-x) route sign bezel,
+  // 3 centered red ID lamps, transit ad frame, engine door seam & 4-lamp circular corner stacks
+  const rearSignBox = boxMask(p.x.add(0.45), p.y.sub(2.58), 0.31, 0.14, invX, invY).mul(rear);
+  const rearLouverArea = boxMask(p.x.sub(0.42), p.y.sub(2.58), 0.44, 0.14, invX, invY)
+    .mul(covUp(0.024, abs(p.x.sub(0.42)), invX))
+    .mul(rear);
+  const rearUpperSlats = mix(
+    float(0.58),
+    smoothstep(0.32, 0.46, fract(p.y.mul(22.0))).mul(0.55).add(0.25),
+    fineFade(fwY)
+  );
+  const rearIdLamps = max(
+    covAt(0.02, length(vec2(min(ax, abs(ax.sub(0.14))).mul(0.7), p.y.sub(2.79).mul(1.4))), invXY),
+    covAt(0.023, length(vec2(ax.sub(0.96).mul(0.65), p.y.sub(2.74).mul(1.4))), invXY)
+  ).mul(rear);
+  const rearAd = boxEdge(p.x, p.y.sub(1.82), 0.63, 0.21, invX, invY);
+  const rearAdInner = cov(rearAd.d, rearAd.inv).mul(rear);
+  const rearAdFrame = covAt(0.03, rearAd.d, rearAd.inv).mul(rear);
+  const rearSeam = max(
+    band(p.y.sub(1.42), 0.008, invY).mul(smoothstep(0.95, 0.93, ax)),
+    band(ax.sub(0.92), 0.008, invX).mul(smoothstep(0.58, 0.62, p.y)).mul(smoothstep(2.77, 2.73, p.y))
+  ).mul(rear);
+  const highBrake = boxMask(p.x, p.y.sub(1.48), 0.2, 0.018, invX, invY).mul(rear);
+
+  // Side rear-corner radiator & exhaust louvers
+  const sideRearGrille = max(
+    boxMask(p.z.sub(s.zRear + 0.52), p.y.sub(0.88), 0.38, 0.3, invZ, invY),
+    boxMask(p.z.sub(s.zRear + 0.48), p.y.sub(2.62), 0.26, 0.13, invZ, invY)
+  ).mul(side);
+  const slats = mix(
+    float(0.56),
+    smoothstep(0.38, 0.52, fract(p.y.mul(18.0))).mul(0.5).add(0.3),
+    fineFade(fwY)
+  );
+
+  // 3. Side window band with black framing, upper transom bar, driver window, and curb-side doors
   const [wy0, wy1] = s.window;
   const winMid = (wy0 + wy1) / 2;
   const winHalf = (wy1 - wy0) / 2;
-  const sideBand = roundedRect(vec2(p.z.add(0.5), p.y.sub(winMid)), vec2(4.82, winHalf), 0.08).mul(side);
-  const mullion = smoothstep(0.03, 0.045, abs(fract(p.z.mul(0.8).add(0.35)).sub(0.5).mul(1.25)));
-  const sideSeal = roundedRect(vec2(p.z.add(0.5), p.y.sub(winMid)), vec2(4.86, winHalf + 0.04), 0.1).mul(side);
-  const driverWin = roundedRect(vec2(p.z.sub(4.86), p.y.sub(winMid + 0.04)), vec2(0.5, winHalf + 0.04), 0.1).mul(side).mul(one.sub(curb));
-  const door = (z0, z1) => {
-    const zc = (z0 + z1) / 2;
-    const hw = (z1 - z0) / 2;
-    const frame = roundedRect(vec2(p.z.sub(zc), p.y.sub(1.44)), vec2(hw, 1.0), 0.05);
-    const leaves = roundedRect(vec2(abs(p.z.sub(zc)).sub(hw * 0.5), p.y.sub(1.5)), vec2(hw * 0.4, 0.84), 0.035);
-    return { frame: frame.mul(side).mul(curb), glass: leaves.mul(side).mul(curb) };
-  };
-  const d0 = door(s.frontDoor[0], s.frontDoor[1]);
-  const d1 = door(s.rearDoor[0], s.rearDoor[1]);
-  const doorFrame = max(d0.frame, d1.frame);
-  const glass = clamp(max(max(frontGlass, rearGlass), max(max(sideBand.mul(mullion), driverWin), max(d0.glass, d1.glass))), 0.0, 1.0);
-  const seal = clamp(max(max(frontSeal, rearSeal), max(max(sideSeal, signBand), doorFrame)), 0.0, 1.0);
+  const sideWin = rBoxEdge(p.z.add(0.78), p.y.sub(winMid), 4.92, winHalf, 0.065, invZ, invY);
+  const sideBand = cov(sideWin.d, sideWin.inv).mul(side);
+  const sideSeal = covAt(0.044, sideWin.d, sideWin.inv).mul(side);
+  // Mullions and stanchions repeat every 1 / 0.76 m along z: filter in that repeat's units
+  const invZRepeat = invZ.div(0.76);
+  const mullion = one.sub(band(fract(p.z.mul(0.76).add(0.18)).sub(0.5), 0.038, invZRepeat));
+  const transomBar = one.sub(band(p.y.sub(2.08), 0.015, invY).mul(0.88));
+  const sideSignCutout = one.sub(boxMask(p.z.sub(3.74), p.y.sub(2.26), 0.56, 0.11, invZ, invY).mul(curb));
+  const drvWin = boxEdge(p.z.sub(4.92), p.y.sub(winMid + 0.02), 0.52, winHalf, invZ, invY);
+  const driverSeal = covAt(0.044, drvWin.d, drvWin.inv).mul(side).mul(one.sub(curb));
+  const driverWin = cov(drvWin.d, drvWin.inv)
+    .mul(covUp(0.02, abs(p.z.sub(4.92)), invZ))
+    .mul(side)
+    .mul(one.sub(curb));
 
-  // MTA livery
-  const shadeY = smoothstep(0.34, 1.2, p.y).mul(0.2).add(0.8);
-  const blueStripe = smoothstep(0.9, 0.93, p.y).mul(smoothstep(1.2, 1.17, p.y));
-  const cyanRibbon = smoothstep(0.84, 0.86, p.y).mul(smoothstep(0.885, 0.865, p.y));
-  const skirt = smoothstep(0.53, 0.5, p.y);
-  const livery = mix(mix(mix(color(0xf0f4f8), color(0x0058b8), blueStripe), color(0x00a8e8), cyanRibbon), color(0x1c2026), skirt).mul(shadeY);
+  // Both curb-side doors evaluated via closest door center (zc = 4.89 or -1.54, half-width = 0.525)
+  const dzDoor = min(abs(p.z.sub(4.89)), abs(p.z.add(1.54)));
+  const doorSide = side.mul(curb);
+  const doorFrame = boxMask(dzDoor, p.y.sub(1.42), 0.525, 1.02, invZ, invY).mul(doorSide);
+  const doorGlass = boxMask(abs(dzDoor.sub(0.25)), p.y.sub(1.48), 0.19, 0.86, invZ, invY)
+    .mul(one.sub(band(p.y.sub(1.18), 0.015, invY).mul(0.85)))
+    .mul(doorSide);
+  const sideGlassPanes = sideBand.mul(mullion).mul(transomBar).mul(sideSignCutout).mul(one.sub(doorFrame));
+  const glass = clamp(max(frontGlass, max(max(sideGlassPanes, driverWin), doorGlass)), 0.0, 1.0);
+  const seal = clamp(max(max(frontMask, rearSignBox), max(max(sideSeal, driverSeal), max(signBand, doorFrame))), 0.0, 1.0);
 
-  // Lamps: twin round headlamps & amber turn signals in black pods; red tail / brake light columns, amber turn &
-  // white reverse lamps at the rear corners; plates
-  const pod = roundedRect(vec2(ax.sub(0.86), p.y.sub(0.8)), vec2(0.27, 0.085), 0.06).mul(front);
-  const headLamp = max(
-    smoothstep(0.05, 0.04, length(vec2(ax.sub(0.72), p.y.sub(0.8)))),
-    smoothstep(0.05, 0.04, length(vec2(ax.sub(0.86), p.y.sub(0.8))))
-  ).mul(pod);
-  const turnFront = smoothstep(0.045, 0.035, length(vec2(ax.sub(1.02), p.y.sub(0.8)))).mul(pod);
-  const tailCol = roundedRect(vec2(ax.sub(1.04), p.y.sub(0.92)), vec2(0.075, 0.27), 0.05).mul(rear);
-  const tailLamp = tailCol.mul(smoothstep(0.93, 0.95, p.y));
-  const turnRear = tailCol.mul(smoothstep(0.92, 0.9, p.y)).mul(smoothstep(0.76, 0.78, p.y));
-  const reverse = tailCol.mul(smoothstep(0.75, 0.73, p.y));
-  const plate = roundedRect(vec2(p.x, p.y.sub(0.77)), vec2(0.16, 0.06), 0.008).mul(max(front.mul(step(ax, 0.3)), rear));
+  // Black rubber wheel-arch fender flares (folded front/rear via az = abs(p.z) into 1 length() call, extending straight down to the 0.35 sill)
+  const archR = s.wheelRadius + s.archGap;
+  const archVec = vec2(az.sub(s.wheelZ), max(float(0.0), p.y.sub(s.wheelRadius)));
+  const dArch = length(archVec);
+  const archDir = archVec.div(max(dArch, 0.0001));
+  const invArch = float(1.0).div(max(abs(archDir.x).mul(fwZ).add(abs(archDir.y).mul(fwY)), 0.0005));
+  const archFlareMask = band(dArch.sub(archR + 0.0225), 0.0325, invArch)
+    .mul(covUp(0.35, p.y, invY))
+    .mul(side);
 
-  let body = mix(livery, color(0x15191e), seal);
-  body = mix(body, color(0x1a1e23).mul(slats), louvres);
-  body = mix(body, color(0x111418), pod);
-  body = mix(body, mix(color(0xdcefff), color(0xffa21a), turnFront), max(headLamp, turnFront));
-  body = mix(body, color(0x9a0d14), tailLamp);
-  body = mix(body, color(0xc8641a), turnRear);
-  body = mix(body, color(0xe8eef2), reverse);
-  body = mix(body, color(0xf2b718), plate);
-  const glassTint = mix(color(0x0e1a26), color(0x1b3046), clamp(p.y.sub(1.3).mul(0.8), 0.0, 1.0));
+  // 4. Three Authentic MTA Liveries (Current Blue/Gold, Select Bus Service Cyan/Blue, Legacy White/Blue)
+  const shadeY = smoothstep(0.34, 1.25, p.y).mul(0.16).add(0.84);
+  const mtaRoyalBlue = color(0x16358a);
+  const mtaSkyBlue = color(0x1a88e0);
+  const sbsCyan = color(0x1fb8d0);
+  const mtaGold = color(0xf0b21a);
+  const mtaWhite = color(0xedf1f6);
+
+  // Upper-front gold & sky-blue swoop arc (from z = 0.8..4.55 above the windows); filtered across its slope
+  const uArc = p.z.sub(2.65).div(1.95);
+  const arcTopY = float(2.86).sub(uArc.mul(uArc).mul(0.38));
+  const invArc = float(1.0).div(fwY.add(abs(uArc).mul(0.39).mul(fwZ)));
+  const inUpperArcZ = smoothstep(0.65, 0.85, p.z).mul(smoothstep(4.65, 4.45, p.z)).mul(covUp(2.42, p.y, invY)).mul(side);
+  const upperGoldArc = band(p.y.sub(arcTopY).add(0.0375), 0.0375, invArc).mul(inUpperArcZ);
+  const upperSkyFill = covAt(-0.075, p.y.sub(arcTopY), invArc).mul(inUpperArcZ);
+
+  // Lower-mid gold & sky-blue diagonal ribbon (rising cleanly between the rear door z = -1.02 and front speed lines z = 0.8)
+  const diagY = p.y.sub(p.z.add(0.9).mul(0.28));
+  const invDiag = float(1.0).div(fwY.add(fwZ.mul(0.28)));
+  const inMidDiag = smoothstep(0.38, 0.42, p.y)
+    .mul(smoothstep(1.22, 1.18, p.y))
+    .mul(smoothstep(-1.06, -1.02, p.z))
+    .mul(side)
+    .mul(one.sub(doorFrame));
+  const midGoldBand = band(diagY.sub(0.8), 0.11, invDiag).mul(inMidDiag);
+  const midSkyBand = band(diagY.sub(0.6), 0.09, invDiag).mul(inMidDiag);
+
+  // Front lower speed-line stripes (sky blue) & rear corner speed-line stripes (gold) — faded to average once the
+  // footprint across the stripes (mostly vertical) exceeds them
+  const frontWave = smoothstep(0.36, 0.56, fract(p.y.add(float(5.5).sub(p.z).mul(0.11)).mul(13.0)));
+  const frontSpeedLines = mix(float(0.55), frontWave, detailFade(fwY.add(fwZ.mul(0.11))))
+    .mul(smoothstep(0.8, 2.4, p.z))
+    .mul(smoothstep(5.55, 5.35, p.z))
+    .mul(smoothstep(0.4, 0.43, p.y))
+    .mul(smoothstep(1.2, 1.16, p.y))
+    .mul(side)
+    .mul(one.sub(isSBS));
+  const rearWave = smoothstep(0.38, 0.58, fract(p.y.sub(p.z.sub(s.zRear).mul(0.26)).mul(10.5)));
+  const rearSpeedLines = mix(float(0.52), rearWave, detailFade(fwY.add(fwZ.mul(0.26))))
+    .mul(smoothstep(-3.3, -4.3, p.z))
+    .mul(smoothstep(0.4, 0.43, p.y))
+    .mul(smoothstep(2.4, 2.2, p.y))
+    .mul(side);
+
+  // Assemble Current (2016+) & SBS livery
+  const lowerBelt = covAt(1.2, p.y, invY).mul(max(side, front));
+  let modernLivery = mix(mtaRoyalBlue, sbsCyan, isSBS.mul(lowerBelt));
+  modernLivery = mix(modernLivery, mix(mtaSkyBlue, sbsCyan, isSBS), max(upperSkyFill, max(midSkyBand, frontSpeedLines)));
+  modernLivery = mix(modernLivery, mtaGold, max(max(upperGoldArc, midGoldBand), rearSpeedLines));
+  modernLivery = mix(modernLivery, color(0xeaa818), rear);
+
+  // Assemble Classic / Legacy White & Blue Stripe livery
+  const blueStripe = band(p.y.sub(1.04), 0.145, invY);
+  const cyanRibbon = band(p.y.sub(0.8325), 0.0125, invY);
+  const legacyLivery = mix(mix(mtaWhite, color(0x0055b3), blueStripe), color(0x00a4e4), cyanRibbon);
+
+  const skirt = covAt(0.415, p.y, invY);
+  const livery = mix(mix(modernLivery, legacyLivery, isLegacy), color(0x181c22), skirt).mul(shadeY);
+
+  // Front MTA circular badge, SBS front lettering band, wheelchair icon & front/rear NY license plates
+  const dMta = length(vec2(p.x, p.y.sub(0.95)));
+  const mtaOuter = covAt(0.102, dMta, invXY).mul(front);
+  const mtaBlueCut = smoothstep(-0.015, -0.035, p.x.add(p.y.sub(0.95).mul(0.22))).add(
+    mix(float(0.48), smoothstep(0.42, 0.62, fract(p.x.add(p.y.mul(0.25)).mul(16.0))), fineFade(fwX))
+      .mul(band(p.y.sub(0.95), 0.042, invY))
+      .mul(smoothstep(-0.03, -0.01, p.x))
+  );
+  const mtaDisc = mtaOuter.mul(one.sub(clamp(mtaBlueCut, 0.0, 1.0).mul(0.88)));
+  const sbsFrontBand = boxMask(p.x, p.y.sub(0.78), 0.48, 0.032, invX, invY)
+    .mul(mix(float(0.65), smoothstep(0.28, 0.45, fract(p.x.mul(14.0))), fineFade(fwX)))
+    .mul(front)
+    .mul(isSBS);
+  const wheelchairBadge = boxMask(p.z.sub(5.52), p.y.sub(0.98), 0.065, 0.075, invZ, invY).mul(doorSide);
+  const frontPlate = boxMask(p.x.sub(0.88), p.y.sub(1.02), 0.14, 0.065, invX, invY).mul(front);
+  const rearPlateEdge = boxEdge(p.x, p.y.sub(0.76), 0.155, 0.07, invX, invY);
+  const rearPlate = cov(rearPlateEdge.d, rearPlateEdge.inv).mul(rear);
+  const rearPlateRecess = covAt(0.036, rearPlateEdge.d, rearPlateEdge.inv).mul(rear);
+  const plate = max(frontPlate, rearPlate);
+  const plateText = mix(float(0.55), smoothstep(0.35, 0.55, fract(p.x.mul(22.0))), fineFade(fwX))
+    .mul(max(band(p.y.sub(0.76), 0.035, invY), band(p.y.sub(1.02), 0.03, invY)));
+  const rearBumperStickers = boxMask(ax.sub(0.61), p.y.sub(0.68), 0.19, 0.055, invX, invY).mul(rear);
+
+  // 5. Lamps: swept Xcelsior wedge headlamps (folded pair) + lower amber turn; 4-lamp vertical circular rear stack (folded)
+  const lampTiltY = p.y.sub(float(0.74).add(ax.sub(0.76).mul(0.14)));
+  const pod = boxMask(ax.sub(0.93), lampTiltY, 0.21, 0.064, invX, invY).mul(front);
+  const headLamp = covAt(0.041, length(vec2(abs(ax.sub(0.91)).sub(0.07), lampTiltY)), invXY).mul(pod);
+  const drlStrip = band(lampTiltY.add(0.038), 0.011, invY).mul(pod);
+  const turnFront = boxMask(ax.sub(1.05), p.y.sub(0.62), 0.075, 0.022, invX, invY).mul(front);
+
+  // Periodic vertical fold for the 4 circular rear lamps at y = 0.70, 0.90, 1.10, 1.30 (1 length() instead of 4)
+  const inRearStack = smoothstep(0.59, 0.61, p.y).mul(smoothstep(1.41, 1.39, p.y)).mul(rear);
+  const dRearLamp = length(vec2(ax.sub(1.03), fract(p.y.sub(0.6).mul(5.0)).sub(0.5).mul(0.2)));
+  const rearBezel = covAt(0.066, dRearLamp, invXY).mul(inRearStack);
+  const rearLens = covAt(0.049, dRearLamp, invXY).mul(inRearStack);
+  const turnRear = rearLens.mul(step(1.2, p.y));
+  const tailLamp = rearLens.mul(step(0.8, p.y)).mul(step(p.y, 1.2));
+  const reverse = rearLens.mul(step(p.y, 0.8));
+  const sideMarkers = covAt(0.025, length(vec2(az.sub(s.wheelZ + 0.68), p.y.sub(1.02))), invZY).mul(side);
+
+  // 6. Tinted window glass with interior passenger seats, yellow vertical grab stanchions & ceiling light strip
+  const skyGrad = clamp(p.y.sub(1.22).mul(0.85), 0.0, 1.0);
+  const seatBack = smoothstep(1.64, 1.54, p.y)
+    .mul(smoothstep(0.1, 0.2, abs(fract(p.z.mul(1.15)).sub(0.5))))
+    .mul(smoothstep(3.85, 3.75, p.z));
+  const grabRail = band(fract(p.z.mul(0.76).add(0.5)).sub(0.5), 0.026, invZRepeat).mul(smoothstep(2.3, 2.26, p.y));
+  const frontInterior = smoothstep(1.62, 1.3, p.y).mul(smoothstep(0.15, 0.35, ax)).mul(front);
+  const ceilingStrip = smoothstep(2.12, 2.32, p.y).mul(smoothstep(4.45, 4.35, p.z));
+  const baseGlass = mix(color(0x0f1c2b), color(0x1f3852), skyGrad);
+  const withSeats = mix(baseGlass, color(0x0a1524), max(seatBack.mul(0.68), frontInterior.mul(0.45)));
+  const withRails = mix(withSeats, color(0xb8921c), grabRail.mul(side).mul(0.5));
+  const glassTint = mix(withRails, color(0x324d66), ceilingStrip.mul(0.28));
+
+  // Composite body surface
+  let body = mix(livery, color(0x12161b), max(seal, max(archFlareMask, max(rearSeam, rearPlateRecess))));
+  body = mix(body, color(0x181c22).mul(slats), sideRearGrille);
+  body = mix(body, color(0x282418).mul(rearUpperSlats), rearLouverArea);
+  body = mix(body, color(0x1c222b), rearAdFrame);
+  body = mix(body, color(0x162e48), rearAdInner);
+  body = mix(body, color(0xf2f6fa), max(mtaDisc, sbsFrontBand));
+  body = mix(body, color(0x1258b8), wheelchairBadge);
+  body = mix(body, color(0x143884), rearBumperStickers);
+  body = mix(body, color(0x12151a), max(pod, rearBezel));
+  body = mix(body, color(0xf2f8ff), max(headLamp, drlStrip));
+  body = mix(body, color(0xff9d14), max(turnFront, max(browMarker, sideMarkers)));
+  body = mix(body, color(0x9e0e16), max(tailLamp, max(highBrake, rearIdLamps)));
+  body = mix(body, color(0xd86e18), turnRear);
+  body = mix(body, color(0xe8eef4), reverse);
+  body = mix(body, mix(color(0xf2b518), color(0x182648), plateText.mul(0.65)), plate);
   body = mix(body, glassTint, glass);
 
-  const col = mix(mix(body, color(0x1b1f24), isTrim), color(0xc9ced3), isPod);
+  const col = mix(mix(body, color(0x191d22), isTrim), color(0xd0d5dc), isPod);
 
   const mat = new THREE.MeshStandardNodeMaterial();
   mat.colorNode = col;
-  mat.roughnessNode = mix(mix(mix(float(0.3), float(0.16), max(glass, max(headLamp, tailCol))), float(0.7), max(isTrim, seal.mul(one.sub(glass)))), float(0.45), isPod);
-  mat.metalnessNode = mix(mix(float(0.22), float(0.7), glass), float(0.05), max(isTrim, isPod));
+  mat.roughnessNode = mix(
+    mix(
+      mix(float(0.16), float(0.06), max(glass, max(headLamp, rearLens))),
+      float(0.68),
+      max(isTrim, max(archFlareMask, seal.mul(one.sub(glass))))
+    ),
+    float(0.36),
+    isPod
+  );
+  mat.metalnessNode = mix(mix(float(0.24), float(0.82), glass), float(0.06), max(isTrim, isPod));
 
   const brake = state.x;
   const blink = max(state.y.mul(step(0.0, p.x)), state.z.mul(step(p.x, 0.0)));
-  const nightHeadlamp = smoothstep(0.60, 1.15, cityUniforms.uInteriorGlow);
-  mat.emissiveNode = color(0xd9efff)
-    .mul(pod.mul(0.45).add(headLamp.mul(1.35)))
-    .mul(nightHeadlamp)
-    .add(color(0xff9a14).mul(max(turnFront, turnRear).mul(blink).mul(2.0)))
-    .add(color(0xff0a12).mul(tailLamp.mul(brake.mul(1.5).add(0.75))));
+  const night = smoothstep(0.55, 1.15, cityUniforms.uInteriorGlow);
+  const cabinGlow = glass
+    .mul(side)
+    .mul(ceilingStrip.mul(0.55).add(float(0.18)).sub(seatBack.mul(0.12)).add(grabRail.mul(0.15)))
+    .mul(night);
+  // Headlamps & DRL blades are visibly lit at all times of day (crossing bloom slightly in daylight, full beam at night)
+  const headEmit = pod
+    .mul(mix(float(0.25), float(0.42), night))
+    .add(drlStrip.mul(mix(float(1.75), float(2.3), night)))
+    .add(headLamp.mul(mix(float(2.45), float(3.2), night)));
+  mat.emissiveNode = color(0xe8f4ff)
+    .mul(headEmit)
+    .add(color(0xfff0d4).mul(cabinGlow))
+    .add(color(0xff9210).mul(max(browMarker, sideMarkers).mul(mix(float(0.65), float(1.15), night))))
+    .add(color(0xff9a14).mul(max(turnFront, turnRear).mul(blink).mul(2.2)))
+    .add(color(0xff0c14).mul(tailLamp.mul(brake.mul(1.6).add(0.75)).add(highBrake.mul(brake.mul(1.8))).add(rearIdLamps.mul(night))));
 
   _busLoftedMat = mat;
   return mat;
@@ -2010,11 +3067,13 @@ export {
   BODY_SPECS,
   carLayout,
   carBodyHalfWidthAt,
+  carTipZ,
   buildCarSidePatch,
   buildSteerableWheelGeo,
   buildCarGeometry,
   buildCarProxyGeometry,
   createLoftedCarMaterial,
+  carStyleCode,
   buildLightbarGeometry,
   createLightbarMaterial,
   BUS_SPEC,
