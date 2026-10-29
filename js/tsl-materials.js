@@ -2039,7 +2039,10 @@ function createRoadSurfaceMaterial() {
  * Strips thinner than ~1.5 px are widened on screen and faded to match (phone-wire AA) and dashes are box-filtered,
  * so distant markings fade out smoothly instead of breaking up and flickering. Worn, and dark & glossy in puddles.
  */
+let _roadPaintMaterial = null;
+
 function createRoadPaintMaterial() {
+  if (_roadPaintMaterial) return _roadPaintMaterial;
   const mat = new THREE.MeshStandardNodeMaterial({
     vertexColors: true,
     transparent: true,
@@ -2054,9 +2057,9 @@ function createRoadPaintMaterial() {
 
   // How much to widen the strip so it is at least 1.5 px wide on screen (1 when it already is)
   const widen = Fn(() => {
-    const viewProjection = cameraProjectionMatrix.mul(cameraViewMatrix);
-    const edge = viewProjection.mul(vec4(positionGeometry, 1.0));
-    const centre = viewProjection.mul(vec4(positionGeometry.sub(sideOffset), 1.0));
+    const toClip = (p) => cameraProjectionMatrix.mul(cameraViewMatrix.mul(vec4(p, 1.0)));
+    const edge = toClip(positionGeometry).toVar();
+    const centre = toClip(positionGeometry.sub(sideOffset)).toVar();
     const halfWidthPx = length(edge.xy.div(edge.w).sub(centre.xy.div(centre.w)).mul(screenSize).mul(0.5));
     const inFront = step(0.05, min(edge.w, centre.w));
     return clamp(float(0.75).div(max(halfWidthPx, 0.001)), 1.0, 16.0).mul(inFront).max(1.0);
@@ -2071,15 +2074,32 @@ function createRoadPaintMaterial() {
   const dashes = onSoFar(t.add(footprint.mul(0.5))).sub(onSoFar(t.sub(footprint.mul(0.5)))).div(footprint);
 
   const xz = positionWorld.xz;
-  const detail = smoothstep(70.0, 15.0, length(positionWorld.sub(cameraPosition)));
-  const wear = mix(float(0.5), noise2D(xz.mul(0.8)).mul(0.6).add(noise2D(xz.mul(2.3)).mul(0.4)), detail);
-  mat.opacityNode = dashes.mul(varying(float(1.0).div(widen))).mul(smoothstep(0.1, 0.6, wear).mul(0.4).add(0.55));
+  const camDist = length(positionWorld.sub(cameraPosition));
+  const detail = smoothstep(70.0, 15.0, camDist);
+  const distFade = smoothstep(1650.0, 1300.0, camDist);
+  const wear = Fn(() => {
+    const w = float(0.5).toVar();
+    If(detail.greaterThan(0.001), () => {
+      w.assign(mix(float(0.5), noise2D(xz.mul(0.8)).mul(0.6).add(noise2D(xz.mul(2.3)).mul(0.4)), detail));
+    });
+    return w;
+  })();
+  mat.opacityNode = dashes.mul(varying(float(1.0).div(widen))).mul(smoothstep(0.1, 0.6, wear).mul(0.4).add(0.55)).mul(distFade);
 
-  const wet = roadWetMasks(roadPuddleField(positionWorld.x, positionWorld.z)); // same pools & film as the asphalt
-  mat.colorNode = vec3(mix(float(1.0), float(0.72), wet.y).mul(mix(float(1.0), float(0.86), wet.z)));
-  mat.roughnessNode = mix(mix(float(0.62), float(0.42), wet.z), float(0.2), wet.y);
+  // Standing-water puddle mask is zero when uRoadWetness <= 0.1 (e.g. midday); evaluate once and share across channels
+  const puddle = Fn(() => {
+    const p = float(0.0).toVar();
+    If(cityUniforms.uRoadWetness.greaterThan(0.1), () => {
+      p.assign(roadWetMasks(roadPuddleField(positionWorld.x, positionWorld.z)).y);
+    });
+    return p;
+  })();
+  const film = smoothstep(0.2, 0.8, cityUniforms.uRoadWetness);
+  mat.colorNode = vec3(mix(float(1.0), float(0.72), puddle).mul(mix(float(1.0), float(0.86), film)));
+  mat.roughnessNode = mix(mix(float(0.62), float(0.42), film), float(0.2), puddle);
   mat.aoNode = canyonSkyAONode();
 
+  _roadPaintMaterial = mat;
   return mat;
 }
 

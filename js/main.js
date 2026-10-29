@@ -111,7 +111,7 @@ async function initApp() {
   markInit('traffic');
   const highwayTraffic = createHighwayTraffic(scene, cityGrid.highwayLanes);
   await showLoadingStage('Adding road markings...');
-  buildRoadPaint(scene, trafficSystem.network);
+  buildRoadPaint(scene, trafficSystem.network, cityGrid.roadPaint);
   markInit('roadPaint');
 
   // 4. Initialize Third-Person Controllers (Person, Car, Cyclist, Helicopter) & Multi-Camera System
@@ -167,7 +167,7 @@ async function initApp() {
   // Island-wide static geometry: chunk & distance-cull the small props, shadow stand-ins for the big casters
   // (scene-culling.js)
   await showLoadingStage('Preparing scene visibility and shadows...');
-  const cullingRoots = ['ManhattanCityGrid', 'ManhattanCityBlocks', 'ManhattanStreetDetails', 'ManhattanLandmarks', 'Boroughs']
+  const cullingRoots = ['ManhattanCityGrid', 'ManhattanCityBlocks', 'ManhattanStreetDetails', 'ManhattanLandmarks', 'Boroughs', 'RoadMarkings']
     .map((name) => scene.getObjectByName(name))
     .filter(Boolean);
   setupSceneCulling(scene, cullingRoots, lightingSystem.sunLight.shadow);
