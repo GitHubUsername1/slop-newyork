@@ -566,7 +566,7 @@ function headReferenceOpacity(pos00, pos10, pos01, normalZ, part, sizeX, sizeY) 
   throw new Error(`Unexpected reference part: ${part}`);
 }
 
-test('escapeGeometry reduces triangle count from 218 to 38 while preserving per-triangle part invariants', () => {
+test('escapeGeometry preserves flat horizontal stair treads and per-triangle part invariants', () => {
   const geo = escapeGeometry();
   const idx = geo.index.array;
   const pos = geo.attributes.position;
@@ -574,10 +574,11 @@ test('escapeGeometry reduces triangle count from 218 to 38 while preserving per-
   const parts = geo.attributes.escapePart.array;
   const levels = geo.attributes.escapeLevel.array;
 
-  assert.equal(idx.length / 3, 38, 'expected 38 triangles per fire escape (down from 218)');
-  assert.equal(pos.count, 76, 'expected 76 vertices per fire escape (down from 436)');
+  assert.equal(idx.length / 3, 218, 'expected 218 triangles per fire escape with 96 flat horizontal treads');
+  assert.equal(pos.count, 436, 'expected 436 vertices per fire escape');
 
-  // Every triangle must have constant escapePart & escapeLevel so vEscapeMeta.x never interpolates across parts
+  // Every triangle must have constant escapePart & escapeLevel so vEscapeMeta.x never interpolates across parts,
+  // and every stair tread (part 6) must be strictly horizontal (constant y across all 3 vertices).
   const partTriCounts = new Map();
   for (let t = 0; t < idx.length; t += 3) {
     const i0 = idx[t], i1 = idx[t + 1], i2 = idx[t + 2];
@@ -585,26 +586,32 @@ test('escapeGeometry reduces triangle count from 218 to 38 while preserving per-
     assert.equal(parts[i0], parts[i2]);
     assert.equal(levels[i0], levels[i1]);
     assert.equal(levels[i0], levels[i2]);
+    if (parts[i0] === 6 || parts[i0] === 5) {
+      const y0 = pos.array[i0 * 3 + 1], y1 = pos.array[i1 * 3 + 1], y2 = pos.array[i2 * 3 + 1];
+      assert.equal(y0, y1, 'tread/landing triangle must be strictly flat (horizontal)');
+      assert.equal(y0, y2, 'tread/landing triangle must be strictly flat (horizontal)');
+    }
     partTriCounts.set(parts[i0], (partTriCounts.get(parts[i0]) || 0) + 1);
   }
   assert.deepEqual(Object.fromEntries(partTriCounts), {
-    1: 6,  // front + 2 side balcony guards
-    3: 4,  // inner + outer diagonal flight guards
-    4: 2,  // drop ladder
-    5: 14, // 7 landing decks
-    6: 12  // 6 sloped stair flights (replaces 192 individual step triangles)
+    1: 6,   // front + 2 side balcony guards
+    3: 4,   // inner + outer diagonal flight guards
+    4: 2,   // drop ladder
+    5: 14,  // 7 landing decks
+    6: 192  // 6 flights x 16 flat horizontal stair treads
   });
 
-  // Every vertex normal must be finite unit length, and horizontal/sloped floor parts must point upward (+Y > 0)
+  // Every vertex normal must be unit length, and both landing decks (5) and stair treads (6) must point straight up (+Y)
   for (let v = 0; v < norm.count; v++) {
     const nx = norm.array[v * 3], ny = norm.array[v * 3 + 1], nz = norm.array[v * 3 + 2];
     assert.ok(Math.abs(Math.hypot(nx, ny, nz) - 1) < 1e-5, 'unit normal');
-    if (parts[v] === 5) assert.ok(Math.abs(ny - 1) < 1e-6, 'landing decks face +Y');
-    if (parts[v] === 6) assert.ok(ny > 0.5, 'sloped stair carriages face +Y on front face');
+    if (parts[v] === 5 || parts[v] === 6) {
+      assert.ok(Math.abs(ny - 1) < 1e-6, 'landing decks and flat stair treads face straight up (+Y)');
+    }
   }
 });
 
-test('positionNode aligns sloped stair flights with landing decks and collapses unused upper storeys', () => {
+test('positionNode keeps horizontal stair treads flat and collapses unused upper storeys', () => {
   const material = createFireEscapeMaterial();
   const storey = 3.85;
   const landings = 4;
@@ -625,26 +632,24 @@ test('positionNode aligns sloped stair flights with landing decks and collapses 
     }
 
     if (level < 6) {
-      const yLow = level * 3.5;
-      const yHigh = (level + 1) * 3.5;
-      const startPos = evalSample(material.positionNode, {
-        positionGeometry: [-1.2, level % 2 ? yHigh : yLow, 0],
+      const stepY = level * 3.5 + (3.5 * 8) / 16;
+      const leftEdge = evalSample(material.positionNode, {
+        positionGeometry: [-0.15, stepY, -0.15],
         normalGeometry: [0, 1, 0],
         attrs: { escapePart: [6], escapeLevel: [level], escapeSize: [storey, h] }
       });
-      const endPos = evalSample(material.positionNode, {
-        positionGeometry: [1.2, level % 2 ? yLow : yHigh, 0],
+      const rightEdge = evalSample(material.positionNode, {
+        positionGeometry: [0.0, stepY, 0.5],
         normalGeometry: [0, 1, 0],
         attrs: { escapePart: [6], escapeLevel: [level], escapeSize: [storey, h] }
       });
       if (level < landings - 1) {
-        const expectedLow = (yLow + 2.2) * scale;
-        const expectedHigh = (yHigh + 2.2) * scale;
-        assert.ok(Math.abs(startPos[1] - (level % 2 ? expectedHigh : expectedLow)) < 1e-6);
-        assert.ok(Math.abs(endPos[1] - (level % 2 ? expectedLow : expectedHigh)) < 1e-6);
+        const expectedStepY = (stepY + 2.2) * scale;
+        assert.ok(Math.abs(leftEdge[1] - expectedStepY) < 1e-6);
+        assert.ok(Math.abs(rightEdge[1] - expectedStepY) < 1e-6, 'both sides of a tread stay at identical horizontal y');
       } else {
-        assert.equal(Math.hypot(...startPos), 0, 'unused stair flight collapses to origin');
-        assert.equal(Math.hypot(...endPos), 0);
+        assert.equal(Math.hypot(...leftEdge), 0, 'unused stair tread collapses to origin');
+        assert.equal(Math.hypot(...rightEdge), 0);
       }
     }
   }
@@ -691,24 +696,17 @@ test('opacityNode obeys WGSL derivative uniformity, gates per-part ALU, and matc
     assert.ok(Math.abs(actual - expected) < 1e-11, `part ${s.part}: actual ${actual} !== expected ${expected}`);
   }
 
-  // Part 6 (sloped stair carriage): 16 open-riser treads + twin side stringers, zero derivatives in branch
-  const evalStair = (x, z, fw = 0.004) => evalSample(
+  // Part 6 (flat horizontal stair treads): solid iron (opacity = 1) with zero procedural bar/pulse calls
+  const treadAlpha = evalSample(
     material.opacityNode,
-    { positionGeometry: [x, 1.75, z], normalGeometry: [0, 1, 0], attrs: { escapePart: [6], escapeLevel: [0], escapeSize: [3.5, 15.0] } },
-    { positionGeometry: [x + fw, 1.75, z] },
-    { positionGeometry: [x, 1.75, z + fw] }
+    { positionGeometry: [0.05, 1.75, 0.175], normalGeometry: [0, 1, 0], attrs: { escapePart: [6], escapeLevel: [0], escapeSize: [3.5, 15.0] } },
+    { positionGeometry: [0.054, 1.75, 0.175] },
+    { positionGeometry: [0.05, 1.75, 0.179] }
   )[0];
 
-  const onTreadCenter = evalStair(-1.2 + (0.5 * 2.4) / 16, 0.175);
-  const inRiserGap = evalStair(-1.2 + (0.02 * 2.4) / 16, 0.175);
-  const onSideStringer = evalStair(-1.2 + (0.02 * 2.4) / 16, 0.495);
-  const farFiltered = evalStair(0.0, 0.175, 0.45);
-
   assert.equal(shaderState.derivativesInBranch, 0, 'part 6 must not call derivatives inside branch');
-  assert.ok(onTreadCenter > 0.99, 'solid iron at tread center');
-  assert.ok(inRiserGap < 0.01, 'open riser gap between treads');
-  assert.ok(onSideStringer > 0.95, 'solid side stringer channel spans riser gaps');
-  assert.ok(farFiltered > 0.55 && farFiltered < 0.75, `distant stair flight filters to open coverage (~0.64, got ${farFiltered})`);
+  assert.equal(shaderState.pulseAndBarCalls, 0, 'part 6 bypasses all procedural bar/pulse helpers');
+  assert.equal(treadAlpha, 1, 'flat horizontal stair treads remain solid');
 });
 
 test('createFireEscapes partitions near shadow casters vs 4x4 far cells and computes tight bounding spheres', () => {

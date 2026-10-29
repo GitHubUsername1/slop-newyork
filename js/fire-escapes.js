@@ -32,9 +32,9 @@ const union = (a, b) => {
   return va.add(vb).sub(va.mul(vb));
 };
 
-// One instance per escape, all masked planes (38 triangles per escape).
+// One instance per escape: masked vertical/landing planes plus flat horizontal stair treads.
 // Parts 1: front & side balcony guards; 3: diagonal flight guards; 4: raised drop ladder (vertical planes y 0..1);
-// 5: horizontal landing decks; 6: sloped stair-flight carriages (16 analytic open-riser treads + side stringers).
+// 5: horizontal landing decks; 6: flat horizontal stair treads (solid geometry, skipping procedural mask ALU).
 export function escapeGeometry() {
   const planes = [
     [3.4, 0, 0.55, 0, 1],
@@ -62,13 +62,20 @@ export function escapeGeometry() {
     geometry.computeVertexNormals();
     return geometry;
   };
+  const steps = 16;
   for (let level = 0; level < MAX_LANDINGS; level++) {
     const y = level * STOREY;
     planes.push(quad([[-1.7, y, -0.55], [-1.7, y, 0.55], [1.7, y, 0.55], [1.7, y, -0.55]], 5, level));
     if (level === MAX_LANDINGS - 1) continue;
-    const y0 = level % 2 ? y + STOREY : y;
-    const y1 = level % 2 ? y : y + STOREY;
-    planes.push(quad([[-1.2, y0, -0.15], [-1.2, y0, 0.5], [1.2, y1, 0.5], [1.2, y1, -0.15]], 6, level));
+    const s = level % 2 ? -1 : 1;
+    for (let i = 0; i < steps; i++) {
+      const x0 = s * (-1.2 + (2.4 * i) / steps);
+      const x1 = s * (-1.2 + (2.4 * (i + 1)) / steps);
+      const stepY = y + (STOREY * (i + 1)) / steps;
+      const minX = Math.min(x0, x1);
+      const maxX = Math.max(x0, x1);
+      planes.push(quad([[minX, stepY, -0.15], [minX, stepY, 0.5], [maxX, stepY, 0.5], [maxX, stepY, -0.15]], 6, level));
+    }
   }
   return mergeGeometries(planes);
 }
@@ -146,12 +153,8 @@ export function createFireEscapeMaterial() {
     const alpha = float(0).toVar();
 
     If(pId.greaterThan(5.5), () => {
-      // Sloped stair flight: 16 open-riser iron treads + twin diagonal side stringers
-      const posX = across.sub(1.7);
-      const stepCoord = posX.add(1.2).mul(16 / 2.4);
-      const treads = filteredPulse(fract(stepCoord), 0.18, 0.82, fwX.mul(16 / 2.4));
-      const stringers = filteredBar(min(posZ.add(0.15), float(0.5).sub(posZ)), 0.025, fwZ);
-      alpha.assign(union(treads, stringers));
+      // Flat horizontal stair treads are solid geometry: bypass all procedural ironwork ALU
+      alpha.assign(1);
     })
       .ElseIf(pId.greaterThan(4.5), () => {
         // Landing decks: 10 cm grating framed around the panels, open in front where the flights pass
