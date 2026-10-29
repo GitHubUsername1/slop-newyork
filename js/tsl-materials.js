@@ -604,6 +604,58 @@ function createStorefront(facade, seed, local) {
   };
 }
 
+// Entrances share the facade surface, including its lighting, shadows and distance filtering.
+function createBuildingEntrance(facade, trim, local, modern = false) {
+  const { wallS, wallW, wallH, fromTop, boxSeed, uCoord, vCoord, back, isRoof, coping } = facade;
+  const width = local ? wallW.div(max(floor(wallW.div(28).add(0.5)), 1)) : float(28);
+  const horizontal = local ? wallS : uCoord.mul(mix(sign(facadeWorldNormal.z), sign(facadeWorldNormal.x).negate(), facadeAlongZ));
+  const grid = horizontal.div(width);
+  const x = fract(grid).sub(0.5).mul(width), y = vCoord.sub(0.22);
+  const fw = vec2(fwidth(horizontal), fwidth(vCoord)).toVar();
+  const band = (p, a, b, w) => boxCoverage(p, a, b, w.mul(0.5));
+  const doubleDoor = step(modern ? 5 : 18, width);
+  const halfWidth = min(mix(0.56, 0.95, doubleDoor), width.mul(0.5).sub(0.28));
+  const height = local ? min(2.48, vCoord.add(fromTop).sub(0.74)) : float(2.48);
+  const grounded = local ? float(1).sub(step(0.35, vCoord.add(fromTop).sub(wallH))) : float(1);
+  const mask = band(x, halfWidth.add(0.20).negate(), halfWidth.add(0.20), fw.x)
+    .mul(band(y, 0, height.add(0.20), fw.y)).mul(grounded)
+    .mul(float(1).sub(max(max(back, isRoof), coping))).mul(step(1.3, width)).mul(step(1.7, height)).toVar();
+  const recess = band(x, halfWidth.add(0.07).negate(), halfWidth.add(0.07), fw.x)
+    .mul(band(y, 0.06, height.add(0.07), fw.y));
+  const leaf = band(x, halfWidth.negate(), halfWidth, fw.x).mul(band(y, 0.10, height, fw.y));
+  const leafX = mix(x, abs(x).sub(halfWidth.mul(0.5)), doubleDoor);
+  const leafWidth = mix(halfWidth, halfWidth.mul(0.5), doubleDoor);
+  const inset = band(leafX, leafWidth.sub(0.10).negate(), leafWidth.sub(0.10), fw.x);
+  const glass = inset.mul(band(y, height.mul(0.48), height.sub(0.16), fw.y)).mul(leaf);
+  const panel = inset.mul(band(y, 0.25, height.mul(0.40), fw.y)).mul(leaf);
+  const handleX = mix(halfWidth.sub(0.13), float(0.12), doubleDoor);
+  const handle = band(mix(x, abs(x), doubleDoor), handleX.sub(0.02), handleX.add(0.02), fw.x)
+    .mul(band(y, 0.98, 1.34, fw.y)).mul(leaf);
+  const seam = band(x, -0.018, 0.018, fw.x).mul(doubleDoor).mul(leaf);
+  const glazing = glass.mul(float(1).sub(max(handle, seam)));
+  const colorNode = Fn(() => {
+    const result = vec3(0).toVar();
+    If(mask.greaterThan(0.001), () => {
+      const choice = hash2D(vec2(boxSeed, floor(grid)));
+      const paint = modern ? color(0x282d32) : mix(color(0x49372a), color(0x263d33), step(0.5, choice));
+      const door = mix(mix(paint, paint.mul(0.62), panel), color(0x14191c), seam);
+      const view = normalize(cameraPosition.sub(positionWorld));
+      const fresnel = pow(float(1).sub(abs(dot(view, facadeWorldNormal))).clamp(0, 1), 2);
+      const glassColor = mix(color(0x23302c), cityUniforms.uSkyHorizonColor, fresnel.mul(0.5).add(0.10));
+      const doorColor = mix(mix(door, glassColor, glazing), color(0xa6a69b), handle);
+      result.assign(mix(mix(trim.mul(0.85), color(0x101515), recess), doorColor, leaf));
+    });
+    return result;
+  })();
+  return {
+    mask,
+    color: colorNode,
+    emissive: color(0xffd6a0).mul(glazing).mul(0.09).mul(cityUniforms.uInteriorGlow),
+    roughness: mix(mix(0.72, 0.43, leaf), 0.16, max(glazing, handle)),
+    relief: recess.mul(-0.025).add(leaf.mul(0.009)).sub(panel.mul(0.004)).add(handle.mul(0.012))
+  };
+}
+
 /**
  * Curtain-Wall Glass Skyscraper TSL Material
  * Features:
@@ -665,6 +717,7 @@ function createCurtainWallMaterial(opts = {}) {
   );
   const aptRoom = evaluateApartmentInterior(uCoord, vCoord, winUV, cellId, bayWidth, uFloorHeight, uSeed, uWarmth, uLitProbability.mul(0.65), fw);
   const storefront = createStorefront(facade, uSeed, boxLocal || footprintLocal);
+  const entrance = createBuildingEntrance(facade, cFrame, boxLocal || footprintLocal, true);
   const floorIdx = floor(gridV);
   const isMechFloor = float(1.0).sub(step(1.0, mod(floorIdx.add(uSeed), 16.0))).mul(step(4.0, floorIdx));
 
@@ -733,7 +786,8 @@ function createCurtainWallMaterial(opts = {}) {
     // Brushed-aluminium coping capping every wall
     const withCap = mix(finalWall, mix(cFrame, color(0xc9ced3), 0.45), coping);
 
-    return mix(mix(withCap, roofColor, isRoof), storefront.color, storefront.mask);
+    const surface = mix(mix(withCap, roofColor, isRoof), storefront.color, storefront.mask);
+    return mix(surface, entrance.color, entrance.mask);
   })();
 
   mat.roughnessNode = Fn(() => {
@@ -742,7 +796,8 @@ function createCurtainWallMaterial(opts = {}) {
     );
     const sillDirt = float(1.0).sub(smoothstep(spandrelRatio, spandrelRatio + 0.18, cellUV.y)).mul(0.18);
     const glassOrFrame = mix(float(0.05).add(sillDirt), float(0.54), max(max(isFrame, isRoof), solid));
-    return mix(mix(glassOrFrame, float(0.36), coping), storefront.roughness, storefront.mask);
+    const surface = mix(mix(glassOrFrame, float(0.36), coping), storefront.roughness, storefront.mask);
+    return mix(surface, entrance.roughness, entrance.mask);
   })();
 
   // Hardware derivative bumpNormal for raised curtain-wall mullions & spandrel channels (ramps >= 2px, see pre-war)
@@ -757,7 +812,8 @@ function createCurtainWallMaterial(opts = {}) {
       .mul(float(1.0).sub(solid)).mul(float(1.0).sub(coping));
     const mullionRelief = float(1.0).sub(inPane).mul(0.014).add(coping.mul(0.01));
 
-    return bumpNormal(mix(mullionRelief, storefront.relief, storefront.mask).mul(detailFade));
+    const relief = mix(mullionRelief, storefront.relief, storefront.mask);
+    return bumpNormal(mix(relief, entrance.relief, entrance.mask).mul(detailFade));
   })();
 
   mat.emissiveNode = Fn(() => {
@@ -775,7 +831,7 @@ function createCurtainWallMaterial(opts = {}) {
       .mul(paneMask)
       .mul(cityUniforms.uInteriorGlow)
       .mul(0.72);
-    return mix(emission, storefront.emissive, storefront.mask);
+    return mix(mix(emission, storefront.emissive, storefront.mask), entrance.emissive, entrance.mask);
   })();
 
   _curtainWallCache.set(cacheKey, mat);
@@ -859,6 +915,7 @@ function createPreWarBuildingMaterial(opts = {}) {
   );
   const aptRoom = evaluateApartmentInterior(uCoord, vCoord, winUV, cellId, bayWidth, uFloorHeight, uSeed, uWarmth, uLitProbability.mul(0.62), fw);
   const storefront = createStorefront(facade, uSeed, boxLocal || footprintLocal);
+  const entrance = createBuildingEntrance(facade, cTrim, boxLocal || footprintLocal);
   // Window AC units (~12% of upper-floor windows), none in the floor the band course covers
   const beltFloor = step(5.0, mod(floor(gridV), 6.0)).mul(front);
   const acRand = hash2D(cellId.add(vec2(uSeed.mul(1.3).add(7.1), 91.7)));
@@ -1030,7 +1087,8 @@ function createPreWarBuildingMaterial(opts = {}) {
     const wallOrRoof = mix(masonryWeathered, roofCol, isRoof);
     const withFrames = mix(wallOrRoof, frameCol, isWindowOpening.mul(sashMask));
     const withGlass = mix(withFrames, glassCol, isWindowGlass);
-    return mix(mix(withGlass, acColor, inACBox), storefront.color, storefront.mask);
+    const surface = mix(mix(withGlass, acColor, inACBox), storefront.color, storefront.mask);
+    return mix(surface, entrance.color, entrance.mask);
   })();
 
   mat.roughnessNode = Fn(() => {
@@ -1044,7 +1102,8 @@ function createPreWarBuildingMaterial(opts = {}) {
     const glassRough = float(0.14).add(pooledRough);
 
     const stoneGrain = noise2D(vec2(uCoord.mul(8.0), vCoord.mul(8.0))).mul(0.12);
-    return mix(mix(float(0.78).add(stoneGrain), glassRough, isWindow), storefront.roughness, storefront.mask);
+    const surface = mix(mix(float(0.78).add(stoneGrain), glassRough, isWindow), storefront.roughness, storefront.mask);
+    return mix(surface, entrance.roughness, entrance.mask);
   })();
 
   // Hardware derivative bumpNormal for domed brickwork, stone courses, recessed windows & AC louvers. Edges ramp over
@@ -1085,7 +1144,8 @@ function createPreWarBuildingMaterial(opts = {}) {
     const wallHeight = brickDome.mul(float(1.0).sub(coping)).add(sillLedge).add(corniceLedge).add(coping.mul(0.024));
     const totalHeight = mix(wallHeight, acLouverHeight.mul(inACBox), isWindow);
 
-    return bumpNormal(mix(totalHeight, storefront.relief, storefront.mask).mul(detailFade));
+    const relief = mix(totalHeight, storefront.relief, storefront.mask);
+    return bumpNormal(mix(relief, entrance.relief, entrance.mask).mul(detailFade));
   })();
 
   mat.emissiveNode = Fn(() => {
@@ -1126,7 +1186,8 @@ function createPreWarBuildingMaterial(opts = {}) {
     const crownMask = smoothstep(uCrownGlowHeight, uCrownGlowHeight.add(26.0), vCoord).mul(float(1.0).sub(isRoof.mul(0.5)));
     const crownFlood = cCrown.mul(crownMask).mul(cityUniforms.uInteriorGlow).mul(0.55);
 
-    return mix(winEmit, storefront.emissive, storefront.mask).add(crownFlood);
+    const emission = mix(mix(winEmit, storefront.emissive, storefront.mask), entrance.emissive, entrance.mask);
+    return emission.add(crownFlood);
   })();
 
   _preWarCache.set(cacheKey, mat);
