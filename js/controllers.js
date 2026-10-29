@@ -14,6 +14,7 @@ import {
   buildCarSidePatch,
   buildSteerableWheelGeo,
   carTipZ,
+  createCarWheelMaterial,
   createLoftedCarMaterial
 } from './cars.js';
 import {
@@ -527,6 +528,7 @@ class ThirdPersonControllerManager {
     // 4. Steerable & Spinning 3D LatheGeometry Tyres + Recessed 5-Spoke Alloy Wheels
     const leftWheelGeo = buildSteerableWheelGeo(spec, -1);
     const rightWheelGeo = buildSteerableWheelGeo(spec, 1);
+    const taxiWheelMat = createCarWheelMaterial({ wheelRadius: spec.wheelRadius });
 
     const wheels = [];
     const wheelCoords = [
@@ -538,7 +540,7 @@ class ThirdPersonControllerManager {
     for (const wc of wheelCoords) {
       const steerPivot = new THREE.Group();
       steerPivot.position.set(wc.side * spec.wheelX, spec.wheelRadius, wc.z);
-      const tire = new THREE.Mesh(wc.side < 0 ? leftWheelGeo : rightWheelGeo, taxiLoftMat);
+      const tire = new THREE.Mesh(wc.side < 0 ? leftWheelGeo : rightWheelGeo, taxiWheelMat);
       tire.castShadow = true;
       tire.receiveShadow = true;
       steerPivot.add(tire);
