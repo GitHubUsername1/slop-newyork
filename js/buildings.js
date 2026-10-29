@@ -350,7 +350,7 @@ function buildCityBlocks(scene, landmarkColliders = []) {
       : b.year && b.year < 1980 ? (tone < 0.55 ? 0 : 3)
         : tone < 0.6 ? 2 : 4;
     // The survey has no building-use data; choose retail independently of facade style and roof details.
-    const storefronts = b.height >= 6 && mulberry32(seed ^ 0x53544f52)() < 0.35;
+    const storefronts = b.height >= 6 && mulberry32(seed ^ 0x53544f52)() < 0.55;
     const record = { ...b, tone, storefronts };
     surveyedBuckets[mat].push(record);
     const detail = {
