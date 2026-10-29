@@ -475,7 +475,7 @@ function facadeCell(windowWidth, floorHeight, boxLocal, cornerPier = 0, footprin
   const solid = max(max(inPier.mul(float(1.0).sub(isGroundFloor)), blank), max(partial, baseWall));
   return {
     isRoof, uCoord, vCoord, gridV, cellId, cellUV, fw, bayWidth, isGroundFloor, solid, back, blank, tone,
-    wallS, wallW, wallH, exposedHeight, fromTop, boxSeed, partial, coping
+    wallS, wallW, wallH, exposedHeight, fromTop, boxSeed, partial, coping, kind
   };
 }
 
@@ -606,7 +606,7 @@ function createStorefront(facade, seed, local) {
 
 // Entrances share the facade surface, including its lighting, shadows and distance filtering.
 function createBuildingEntrance(facade, trim, local, modern = false) {
-  const { wallS, wallW, wallH, fromTop, boxSeed, uCoord, vCoord, back, isRoof, coping } = facade;
+  const { wallS, wallW, wallH, fromTop, boxSeed, uCoord, vCoord, back, isRoof, coping, kind } = facade;
   const width = local ? wallW.div(max(floor(wallW.div(28).add(0.5)), 1)) : float(28);
   const horizontal = local ? wallS : uCoord.mul(mix(sign(facadeWorldNormal.z), sign(facadeWorldNormal.x).negate(), facadeAlongZ));
   const grid = horizontal.div(width);
@@ -618,7 +618,7 @@ function createBuildingEntrance(facade, trim, local, modern = false) {
   const height = local ? min(2.48, vCoord.add(fromTop).sub(0.74)) : float(2.48);
   const grounded = local ? float(1).sub(step(0.35, vCoord.add(fromTop).sub(wallH))) : float(1);
   const mask = band(x, halfWidth.add(0.20).negate(), halfWidth.add(0.20), fw.x)
-    .mul(band(y, 0, height.add(0.20), fw.y)).mul(grounded)
+    .mul(band(y, 0, height.add(0.20), fw.y)).mul(grounded).mul(step(WALL_KINDS.shop + 0.5, kind))
     .mul(float(1).sub(max(max(back, isRoof), coping))).mul(step(1.3, width)).mul(step(1.7, height)).toVar();
   const recess = band(x, halfWidth.add(0.07).negate(), halfWidth.add(0.07), fw.x)
     .mul(band(y, 0.06, height.add(0.07), fw.y));
