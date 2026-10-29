@@ -325,6 +325,14 @@ class ThirdPersonControllerManager {
   setMode(mode) {
     if (!this.entities[mode]) return;
     this.activeMode = mode;
+    const active = this.entities[mode];
+    if (active.mesh) active.mesh.visible = true;
+    if (active.helmet) active.helmet.visible = true;
+    if (mode === 'person') active._charHidden = false;
+    else if (mode === 'cyclist') {
+      active._riderHidden = false;
+      active._posedX = NaN;
+    }
     const car = this.entities.car;
     if (mode !== 'car' && car?.carState) car.carState.value.x = car.carState.value.w = 0;
   }
@@ -349,6 +357,8 @@ class ThirdPersonControllerManager {
     ent.speed = 0;
     if (this.activeMode === 'person') {
       ent.verticalVel = 0;
+      ent._charHidden = false;
+      if (ent.mesh) ent.mesh.visible = true;
       ent.rig.reset(ent.position.x, ent.position.z, ent.heading, personGround, this);
       ent.crowd.begin();
       ent.crowd.add(ent.rig, 0);
@@ -365,6 +375,9 @@ class ThirdPersonControllerManager {
       if (ent.carState) ent.carState.value.x = ent.carState.value.w = 0;
     } else if (this.activeMode === 'cyclist') {
       ent.leanAngle = ent.leanPivot.rotation.z = 0;
+      ent._riderHidden = false;
+      ent._posedX = NaN;
+      if (ent.helmet) ent.helmet.visible = true;
     } else if (heli) {
       ent.verticalSpeed = ent.pitchAngle = ent.rollAngle = 0;
       ent.tiltPivot.rotation.x = ent.tiltPivot.rotation.z = 0;
@@ -991,24 +1004,76 @@ class ThirdPersonControllerManager {
   // Pose the skinned characters once every entity has moved: the pedestrian's rig walks (or runs, turns, jumps) it to
   // where it now is, planting its feet on the ground; the cyclist sits on the bike, hands on the grips, feet on the
   // pedals, helmet on its head
-  poseCharacters(dt) {
+  poseCharacters(dt, focusPos = null) {
+    const focus = focusPos || this.getActiveEntity()?.position;
+    const maxDistSq = 320 * 320;
+
     const p = this.entities.person;
-    const air = p.position.y - this.getGroundHeight(p.position.x, p.position.z, 'person');
-    p.rig.update(dt, p.position.x, p.position.z, p.heading, personGround, this, air > 0.02 ? air : 0);
-    p.crowd.begin();
-    p.crowd.add(p.rig, 0);
-    p.crowd.end();
+    if (p) {
+      const dx = focus ? p.position.x - focus.x : 0;
+      const dz = focus ? p.position.z - focus.z : 0;
+      if (this.activeMode === 'person' || dx * dx + dz * dz <= maxDistSq) {
+        p._charHidden = false;
+        if (p.mesh) p.mesh.visible = true;
+        const air = p.position.y - this.getGroundHeight(p.position.x, p.position.z, 'person');
+        p.rig.update(dt, p.position.x, p.position.z, p.heading, personGround, this, air > 0.02 ? air : 0);
+        p.crowd.begin();
+        p.crowd.add(p.rig, 0);
+        p.crowd.end();
+      } else if (!p._charHidden) {
+        p.rig.placed = false;
+        p.crowd.begin();
+        p.crowd.end();
+        if (p.crowd.updates > 2) {
+          if (p.mesh) p.mesh.visible = false;
+          p._charHidden = true;
+        }
+      }
+    }
 
     const b = this.entities.cyclist;
-    b.riderRig.ride(b.leanPivot, b.pedalPhase, b.bikeFrame);
-    b.riderCrowd.begin();
-    b.riderCrowd.add(b.riderRig, 0);
-    b.riderCrowd.end();
-    b.helmet.quaternion.copy(b.riderRig.headQuaternion);
-    b.helmet.position.set(0, 0.175, -0.012).applyQuaternion(b.helmet.quaternion).add(b.riderRig.headPosition);
+    if (b) {
+      const dx = focus ? b.position.x - focus.x : 0;
+      const dz = focus ? b.position.z - focus.z : 0;
+      if (this.activeMode === 'cyclist' || dx * dx + dz * dz <= maxDistSq) {
+        if (b.helmet) b.helmet.visible = true;
+        const moved =
+          this.activeMode === 'cyclist' ||
+          b._riderHidden ||
+          b._posedX !== b.position.x ||
+          b._posedY !== b.position.y ||
+          b._posedZ !== b.position.z ||
+          b._posedH !== b.heading ||
+          b._posedLean !== b.leanAngle ||
+          b._posedPedal !== b.pedalPhase;
+        b._riderHidden = false;
+        if (moved) {
+          b.riderRig.ride(b.leanPivot, b.pedalPhase, b.bikeFrame);
+          b.riderCrowd.begin();
+          b.riderCrowd.add(b.riderRig, 0);
+          b.riderCrowd.end();
+          b.helmet.quaternion.copy(b.riderRig.headQuaternion);
+          b.helmet.position.set(0, 0.175, -0.012).applyQuaternion(b.helmet.quaternion).add(b.riderRig.headPosition);
+          b._posedX = b.position.x;
+          b._posedY = b.position.y;
+          b._posedZ = b.position.z;
+          b._posedH = b.heading;
+          b._posedLean = b.leanAngle;
+          b._posedPedal = b.pedalPhase;
+        }
+      } else if (!b._riderHidden) {
+        b.riderCrowd.begin();
+        b.riderCrowd.end();
+        if (b.riderCrowd.updates > 2) {
+          if (b.helmet) b.helmet.visible = false;
+          b._riderHidden = true;
+          b._posedX = NaN;
+        }
+      }
+    }
   }
 
-  update(dt, elapsed) {
+  update(dt, elapsed, focusPos = null) {
     const heli = this.entities.helicopter;
     heli.mainRotorPivot.rotation.y += dt * 24.0;
     heli.tailRotorPivot.rotation.x += dt * 32.0;
@@ -1056,7 +1121,7 @@ class ThirdPersonControllerManager {
       bike.headLight.intensity = bikeActive ? 115 * beamScale : 0;
     }
 
-    this.poseCharacters(dt);
+    this.poseCharacters(dt, focusPos);
   }
 
   updatePerson(dt) {
