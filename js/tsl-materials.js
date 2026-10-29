@@ -384,8 +384,8 @@ const evaluateApartmentInterior = Fn(([uCoord, vCoord, winUV, cellId, winWNode, 
   return vec4(finalRoomCol, mix(litRoom, distantLit, lod).mul(bestEmit));
 });
 
-// Street fronts have shops, courtyard walls have windows, and shared lot-line walls are solid masonry.
-const WALL_KINDS = { shop: 0, rear: 2, lotLine: 3 };
+// Street fronts may have shops; courtyard walls have windows and shared lot-line walls are solid masonry.
+const WALL_KINDS = { shop: 0, front: 1, rear: 2, lotLine: 3 };
 
 /**
  * Shared facade coordinates and masks. World-space by default; createFacadeBoxes and createBuildingFootprints
@@ -402,7 +402,7 @@ function facadeCell(windowWidth, floorHeight, boxLocal, cornerPier = 0, footprin
   let bayWidth = float(windowWidth);
   let gridU = uCoord.div(bayWidth);
   let inPier = float(0.0);
-  let kind = float(WALL_KINDS.shop);
+  let kind = float(WALL_KINDS.front);
   let tone = float(0.5);
   let wallS = float(0.0);
   let wallW = float(1.0);
@@ -458,6 +458,7 @@ function facadeCell(windowWidth, floorHeight, boxLocal, cornerPier = 0, footprin
   const isGroundFloor = floor0.mul(float(1.0).sub(step(WALL_KINDS.shop + 0.5, kind)));
   const blank = step(WALL_KINDS.lotLine - 0.5, kind).mul(wall);
   const back = step(WALL_KINDS.rear - 0.5, kind).mul(wall);
+  const baseWall = floor0.sub(isGroundFloor).mul(float(1.0).sub(back)).mul(wall);
   // A box that isn't a whole number of storeys (landmark tiers) ends in a solid parapet instead of slicing a row of
   // windows, and starts with one above the roof it stands on; every wall is capped by a coping at its top
   let partial = float(0.0);
@@ -471,7 +472,7 @@ function facadeCell(windowWidth, floorHeight, boxLocal, cornerPier = 0, footprin
     partial = float(1.0).sub(whole).mul(wall);
     coping = float(1.0).sub(step(0.32, fromTop)).mul(wall);
   }
-  const solid = max(max(inPier.mul(float(1.0).sub(isGroundFloor)), blank), partial);
+  const solid = max(max(inPier.mul(float(1.0).sub(isGroundFloor)), blank), max(partial, baseWall));
   return {
     isRoof, uCoord, vCoord, gridV, cellId, cellUV, fw, bayWidth, isGroundFloor, solid, back, blank, tone,
     wallS, wallW, wallH, exposedHeight, fromTop, boxSeed, partial, coping
@@ -652,7 +653,7 @@ function createCurtainWallMaterial(opts = {}) {
   // The facade cell and the apartment behind each pane are built once and shared by every output below, so the
   // shader carries a single copy of them (and evaluates the interior mapping once per pixel)
   const facade = facadeCell(uWindowWidth, uFloorHeight, boxLocal || footprintLocal, 0, footprintLocal);
-  const { isRoof, uCoord, vCoord, gridV, cellId, cellUV, fw, bayWidth, partial, coping } = facade;
+  const { isRoof, uCoord, vCoord, gridV, cellId, cellUV, fw, bayWidth, solid, coping } = facade;
   // Pane UV inside the mullions and spandrel.
   const winUV = clamp(
     vec2(
@@ -668,10 +669,10 @@ function createCurtainWallMaterial(opts = {}) {
   const isMechFloor = float(1.0).sub(step(1.0, mod(floorIdx.add(uSeed), 16.0))).mul(step(4.0, floorIdx));
 
   mat.colorNode = Fn(() => {
-    // No glass in a storey the box cuts short (solid spandrel instead) nor behind the coping
+    // Solid walls and coping have no glazing.
     const isGlassPane = filteredPulse(cellUV.x, mullionThickness * 0.5, 1.0 - mullionThickness * 0.5, fw.x)
       .mul(filteredPulse(cellUV.y, spandrelRatio + 0.015, 1.0 - mullionThickness * 0.5, fw.y))
-      .mul(float(1.0).sub(isRoof)).mul(float(1.0).sub(partial)).mul(float(1.0).sub(coping));
+      .mul(float(1.0).sub(isRoof)).mul(float(1.0).sub(solid)).mul(float(1.0).sub(coping));
 
     const louverStripes = sin(vCoord.mul(22.0)).mul(0.5).add(0.5);
 
@@ -740,7 +741,7 @@ function createCurtainWallMaterial(opts = {}) {
       filteredPulse(cellUV.x, mullionThickness, 1.0 - mullionThickness, fw.x).mul(filteredPulse(cellUV.y, spandrelRatio, 1.0, fw.y))
     );
     const sillDirt = float(1.0).sub(smoothstep(spandrelRatio, spandrelRatio + 0.18, cellUV.y)).mul(0.18);
-    const glassOrFrame = mix(float(0.05).add(sillDirt), float(0.54), max(max(isFrame, isRoof), partial));
+    const glassOrFrame = mix(float(0.05).add(sillDirt), float(0.54), max(max(isFrame, isRoof), solid));
     return mix(mix(glassOrFrame, float(0.36), coping), storefront.roughness, storefront.mask);
   })();
 
@@ -753,7 +754,7 @@ function createCurtainWallMaterial(opts = {}) {
     const ramp = fw.mul(2.0).max(0.02);
     const inPane = filteredPulse(cellUV.x, mullionThickness + 0.01, 0.99 - mullionThickness, ramp.x)
       .mul(filteredPulse(cellUV.y, spandrelRatio + 0.01, 0.99 - mullionThickness, ramp.y))
-      .mul(float(1.0).sub(partial)).mul(float(1.0).sub(coping));
+      .mul(float(1.0).sub(solid)).mul(float(1.0).sub(coping));
     const mullionRelief = float(1.0).sub(inPane).mul(0.014).add(coping.mul(0.01));
 
     return bumpNormal(mix(mullionRelief, storefront.relief, storefront.mask).mul(detailFade));
@@ -763,7 +764,7 @@ function createCurtainWallMaterial(opts = {}) {
     const inPane = filteredPulse(cellUV.x, mullionThickness + 0.015, 1.0 - mullionThickness - 0.015, fw.x)
       .mul(filteredPulse(cellUV.y, spandrelRatio + 0.02, 1.0 - mullionThickness * 0.5, fw.y));
     const paneMask = inPane.mul(float(1.0).sub(isRoof)).mul(float(1.0).sub(isMechFloor))
-      .mul(float(1.0).sub(partial)).mul(float(1.0).sub(coping));
+      .mul(float(1.0).sub(solid)).mul(float(1.0).sub(coping));
 
     const viewDir = normalize(cameraPosition.sub(positionWorld));
     const fresnel = pow(clamp(float(1.0).sub(abs(dot(viewDir, normalWorldGeometry))), 0.0, 1.0), 2.0);

@@ -343,12 +343,16 @@ function buildCityBlocks(scene, landmarkColliders = []) {
   const surveyedBuckets = materials.map(() => []);
   const detailsToPlace = [];
   for (const b of surveyedBuildings) {
-    const rand = mulberry32(Math.round(b.cx * 31 + b.cz * 17));
+    const seed = Math.round(b.cx * 31 + b.cz * 17);
+    const rand = mulberry32(seed);
     const tone = rand();
     const mat = b.year && b.year < 1945 ? (tone < 0.8 ? 0 : 1)
       : b.year && b.year < 1980 ? (tone < 0.55 ? 0 : 3)
         : tone < 0.6 ? 2 : 4;
-    surveyedBuckets[mat].push({ ...b, tone });
+    // The survey has no building-use data; choose retail independently of facade style and roof details.
+    const storefronts = b.height >= 6 && mulberry32(seed ^ 0x53544f52)() < 0.35;
+    const record = { ...b, tone, storefronts };
+    surveyedBuckets[mat].push(record);
     const detail = {
       cx: b.cx, cz: b.cz, minX: b.minX, maxX: b.maxX, minZ: b.minZ, maxZ: b.maxZ,
       cornices: [], waterTowers: [], hvacUnits: [], fireEscapes: [], awnings: [], scaffoldSheds: [], footprints: []
@@ -362,7 +366,7 @@ function buildCityBlocks(scene, landmarkColliders = []) {
     }
     const neighbours = nearbyReserves(b, 6);
     addSurveyedFireEscapes(b, detail, storeys[mat], neighbours);
-    detailsToPlace.push({ b, detail, masonry: mat < 2, rand });
+    detailsToPlace.push({ b: record, detail, masonry: mat < 2, rand });
     allBlocks.push(detail);
   }
   // Reserve every fire escape before placing storefronts on neighbouring buildings.
