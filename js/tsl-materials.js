@@ -465,7 +465,9 @@ function facadeCell(windowWidth, floorHeight, boxLocal, cornerPier = 0, footprin
   if (boxLocal) {
     const top = vCoord.add(fromTop);
     const floorBase = floor(gridV).mul(floorHeight);
-    const whole = step(top.sub(wallH).sub(0.05), floorBase).mul(step(floorBase.add(floorHeight), top.add(0.05)));
+    const belowTop = step(floorBase.add(floorHeight), top.add(0.05));
+    // Surveyed walls start at the sidewalk; only stacked boxes need a bottom cutoff.
+    const whole = footprintLocal ? belowTop : step(top.sub(wallH).sub(0.05), floorBase).mul(belowTop);
     partial = float(1.0).sub(whole).mul(wall);
     coping = float(1.0).sub(step(0.32, fromTop)).mul(wall);
   }
